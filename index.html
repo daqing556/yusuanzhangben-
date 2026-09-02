@@ -1,0 +1,3246 @@
+<!doctype html>
+<html lang="zh-CN"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="预算账本">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%236d28d9'/%3E%3Ctext x='50' y='50' font-size='50' text-anchor='middle' alignment-baseline='central' fill='white'%3E%24%3C/text%3E%3C/svg%3E">
+  <title>语音 + 预算账本（可点击原型）</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js');
+      });
+    }
+  </script>
+</head>
+<body>
+<style>
+  :root{
+    --font: ui-sans-serif, system-ui, -apple-system, "SF Pro Display","SF Pro Text","PingFang SC","Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --bg: #0b1220;
+    --surface: #ffffff;
+    --surface-2: #f6f7fb;
+    --text: #0f172a;
+    --muted: rgba(15,23,42,.66);
+    --border: rgba(17,24,39,.14);
+    --brand: #6d28d9;
+    --danger: #dc2626;
+    --ok: #16a34a;
+    --shadow: 0 10px 34px rgba(0,0,0,.28);
+    --r12: 12px;
+    --r16: 16px;
+    --r999: 999px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    font-family: var(--font);
+    background: radial-gradient(1200px 900px at 50% 0%, rgba(109,40,217,.25), rgba(11,18,32,0) 55%), var(--bg);
+    color: #e2e8f0;
+  }
+  .wrap{
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 22px 16px 40px;
+    display:grid;
+    grid-template-columns: 1.1fr .9fr;
+    gap: 18px;
+    align-items:start;
+  }
+  
+  .panelShell{}
+  .panel{
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(226,232,240,.14);
+    border-radius: 16px;
+    box-shadow: 0 10px 34px rgba(0,0,0,.30);
+    padding: 16px;
+  }
+  .floatingPanel{
+    position: fixed;
+    top: 16px;
+    z-index: 20;
+  }
+  @media (max-width: 920px){
+    .floatingPanel{
+      position: static;
+      width: auto !important;
+      left: auto !important;
+      top: auto !important;
+    }
+  }
+  .panel h1{
+    margin:0;
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+  .panel p{
+    margin: 6px 0 0 0;
+    color: rgba(226,232,240,.78);
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .panel ul{
+    margin: 12px 0 0 0;
+    padding-left: 18px;
+    color: rgba(226,232,240,.78);
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .panel li{ margin: 6px 0; }
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding: 4px 10px;
+    border-radius: var(--r999);
+    border: 1px solid rgba(226,232,240,.18);
+    background: rgba(255,255,255,.06);
+    color: rgba(226,232,240,.86);
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 600;
+  }
+  .row{ display:flex; align-items:center; justify-content:space-between; gap: 10px; flex-wrap: wrap; }
+
+  /* phone */
+  .phoneShell{
+    padding: 14px;
+    border-radius: 26px;
+    border: 1px solid rgba(226,232,240,.14);
+    background: linear-gradient(180deg, rgba(109,40,217,.22), rgba(109,40,217,0));
+  }
+  .phone{
+    border-radius: 22px;
+    background: var(--surface);
+    border: 1px solid rgba(17,24,39,.14);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    color: var(--text);
+    position: relative; /* Ensure fixed children context if needed */
+  }
+  .topbar{
+    height: 52px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-bottom: 1px solid var(--border);
+    position:relative;
+    background: var(--surface);
+  }
+  .notch{
+    position:absolute;
+    top: 12px;
+    width: 132px;
+    height: 24px;
+    border-radius: 16px;
+    background: rgba(15,23,42,.10);
+  }
+  .title{
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 700;
+  }
+  .screen{
+    min-height: 610px;
+    padding: 12px;
+    background: var(--surface);
+    flex: 1;
+    overflow-y: auto;
+  }
+  .nav{
+    display:grid;
+    grid-template-columns: repeat(4,1fr);
+    border-top: 1px solid var(--border);
+    padding: 8px 0;
+    position: sticky;
+    bottom: 0;
+    background: var(--surface);
+    z-index: 100;
+  }
+  .nav button{
+    appearance:none;
+    border: 0;
+    background: transparent;
+    padding: 10px 6px;
+    cursor:pointer;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .nav button[data-active="1"]{ color: var(--text); }
+
+  /* components */
+  .card{
+    border: 1px solid var(--border);
+    border-radius: var(--r16);
+    background: var(--surface);
+    padding: 12px;
+  }
+  .card + .card{ margin-top: 12px; }
+  .h{
+    margin:0;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 800;
+  }
+  .sub{
+    margin: 4px 0 0 0;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--muted);
+  }
+  .kpi{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .kpi .big{ font-size: 16px; line-height: 24px; font-weight: 900; }
+  .kpi .small{ font-size: 12px; line-height: 18px; color: var(--muted); }
+  .bar{
+    height: 10px;
+    border-radius: var(--r999);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    overflow:hidden;
+    margin-top: 10px;
+  }
+  .bar > div{ height: 100%; background: var(--brand); width: 0%; }
+
+  .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mono{ font-family: var(--mono); }
+
+  .btn{
+    appearance:none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 12px;
+    cursor:pointer;
+    font-weight: 800;
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .btn.primary{ background: var(--brand); color:#fff; border-color: transparent; }
+  .btn.danger{ background: rgba(220,38,38,.08); color: var(--danger); border-color: rgba(220,38,38,.25); }
+  .btn.small{ padding: 8px 10px; font-size: 12px; line-height: 18px; border-radius: 10px; }
+
+  .input, .select, .textarea{
+    width:100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 16px;
+    line-height: 20px;
+    outline: none;
+  }
+  .textarea{ min-height: 84px; resize: vertical; font-family: var(--font); }
+  .label{ font-size: 12px; line-height: 18px; color: var(--muted); font-weight: 800; }
+  .field{ margin-top: 10px; }
+  .hint{ margin-top: 6px; font-size: 12px; line-height: 18px; color: var(--muted); }
+
+  /* modal */
+  .modalBack{
+    position: fixed;
+    inset: 0;
+    background: rgba(2,6,23,.58);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding: 18px;
+  }
+  .modal{
+    width: min(520px, 100%);
+    background: var(--surface);
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    padding: 14px;
+    color: var(--text);
+  }
+  .modal h2{
+    margin:0;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 900;
+  }
+  .modal .actions{ display:flex; gap: 10px; justify-content:flex-end; margin-top: 12px; }
+  .hr{ height:1px; background: var(--border); margin: 10px 0; }
+
+  .toast{
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    background: rgba(15,23,42,.92);
+    color: #f8fafc;
+    border: 1px solid rgba(226,232,240,.16);
+    border-radius: 999px;
+    padding: 10px 14px;
+    font-size: 12px;
+    line-height: 18px;
+    display:none;
+  }
+
+  /* quick add */
+  .quick{
+    border: 1px solid rgba(109,40,217,.22);
+    background: rgba(109,40,217,.06);
+    border-radius: 16px;
+    padding: 12px;
+    margin-top: 12px;
+  }
+  .qtable{
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 12px;
+  }
+  @media (max-width: 520px){
+    .qtable{ grid-template-columns: 1fr; }
+  }
+  .qrow{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    padding: 6px 0;
+  }
+  .qlabel{
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 900;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .qmeta{
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--muted);
+    margin-left: 6px;
+    font-weight: 700;
+  }
+  .qinput{
+    width: 140px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-weight: 900;
+    font-size: 16px;
+    line-height: 20px;
+    text-align: right;
+  }
+
+  /* settings rows (clear labels) */
+  .srows{ margin-top: 8px; display:flex; flex-direction:column; gap: 8px; }
+  .srow{ display:flex; align-items:center; justify-content:space-between; gap: 12px; }
+  .slabel{ font-size: 12px; line-height: 18px; font-weight: 900; color: var(--text); }
+  .sinput{
+    width: 120px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-weight: 900;
+    font-size: 16px;
+    line-height: 20px;
+    text-align: right;
+  }
+  .shelp{ font-size: 12px; line-height: 18px; color: var(--muted); }
+  .smeta{ font-size: 12px; line-height: 18px; color: var(--muted); font-weight: 800; white-space: nowrap; }
+  .foodline{
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .foodsum{
+    border: 1px dashed rgba(109,40,217,.35);
+    background: rgba(109,40,217,.06);
+    border-radius: 12px;
+    padding: 10px 10px;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 900;
+    color: var(--text);
+    text-align: right;
+    white-space: nowrap;
+    font-family: var(--mono);
+  }
+  @media (max-width: 520px){
+    .sinput{ width: 110px; }
+    .foodline{ grid-template-columns: 1fr 1fr 1fr; }
+    .foodsum{ grid-column: 1 / -1; text-align: left; }
+  }
+  .chips{ display:flex; flex-wrap:wrap; gap: 8px; margin-top: 10px; }
+  .chip{
+    appearance:none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 999px;
+    padding: 8px 10px;
+    cursor:pointer;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 800;
+    color: var(--muted);
+  }
+  .chip[data-on="1"]{
+    border-color: rgba(109,40,217,.35);
+    color: var(--text);
+    background: rgba(109,40,217,.10);
+  }
+  .amountInput{
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    font-family: var(--mono);
+    font-weight: 900;
+    font-size: 16px;
+    line-height: 24px;
+  }
+  .miniInput{
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+    font-family: var(--mono);
+    font-weight: 900;
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .quickGrid{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 10px;
+  }
+  @media (max-width: 520px){
+    .quickGrid{ grid-template-columns: 1fr; }
+  }
+  .quickSectionTitle{
+    margin-top: 12px;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 900;
+    color: var(--muted);
+  }
+@media (max-width: 920px){
+    body { margin: 0; padding: 0; background: var(--surface); }
+    .wrap{ grid-template-columns: 1fr; padding: 0; margin: 0; background: var(--surface); }
+    .phoneShell { padding: 0; margin: 0; background: transparent; border: none; }
+    .phone { 
+      border-radius: 0; 
+      border: none; 
+      box-shadow: none; 
+      width: 100vw !important;
+      min-height: 100vh !important;
+      min-height: 100dvh !important;
+      margin: 0;
+    }
+    .topbar { padding-top: max(env(safe-area-inset-top, 20px), 16px); }
+    .notch { display: none; }
+    .screen { padding-bottom: calc(max(env(safe-area-inset-bottom, 20px), 16px) + 80px); }
+    .nav { 
+      position: fixed !important; 
+      bottom: 0 !important; 
+      left: 0 !important; 
+      width: 100vw !important; 
+      padding-bottom: max(env(safe-area-inset-bottom, 20px), 16px) !important; 
+      z-index: 9999 !important;
+    }
+    
+    #rightPanelShell { display: none; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="phoneShell">
+    <div class="phone" id="app">
+      <div class="topbar">
+        <div class="notch" aria-hidden="true"></div>
+        <div class="title" id="screenTitle">账本</div>
+      </div>
+
+      <div class="screen" id="screen"><div><div class="card">
+      <div class="row">
+        <div>
+          <p class="h">月总预算（=分类预算汇总）</p>
+          <p class="sub">本月剩余 / 总额 · 百分比</p>
+        </div>
+        <span class="pill">2026-09</span>
+      </div>
+      <div class="kpi">
+        <div class="big">¥ 2,130</div>
+        <div class="small">已用 0% · 总额 ¥ 2,130</div>
+      </div>
+      <div class="bar"><div style="width:100%"></div></div>
+    </div><div class="quick">
+      <div class="row">
+        <div>
+          <p class="h">随手记（直接输入，不用切换）</p>
+          <p class="sub">你只要输入金额按回车（或点一下空白处）：立刻记账；写错就点“撤销上一笔”。</p>
+        </div>
+        <div class="row" style="justify-content:flex-end; gap:10px;">
+          <button class="btn small" data-act="fill">填示例</button>
+          <button class="btn small" data-act="undo">撤销上一笔</button>
+        </div>
+      </div>
+
+      <div class="qtable" aria-label="quick-inputs">
+      <div class="qrow">
+        <div>
+          <span class="qlabel">吃饭</span>
+          <span class="qmeta" data-food-meta="">自动：夜宵</span>
+        </div>
+        <input class="qinput" data-food-auto="" inputmode="decimal" placeholder="金额">
+      </div>
+        <div class="qrow">
+          <div><span class="qlabel">水果</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="fruit" inputmode="decimal" placeholder="金额">
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">零食</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="snack" inputmode="decimal" placeholder="金额">
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">游玩</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="fun" inputmode="decimal" placeholder="金额">
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">药品</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="med" inputmode="decimal" placeholder="金额">
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">网费</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="net" inputmode="decimal" placeholder="金额">
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">日用</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="daily" inputmode="decimal" placeholder="金额">
+        </div>
+        <div data-extra-rows=""></div>
+      </div>
+
+      <div class="hint">吃饭餐别由时间自动判断（你可在设置里改时间段）。自定义类别会自动出现在这里。</div>
+    </div><div class="card">
+      <div class="row">
+        <div>
+          <p class="h">吃饭余额（今天剩余，含结转）</p>
+          <p class="sub">你只填“吃饭金额”，系统按时间自动归类；当前时间会归到：夜宵</p>
+        </div>
+        <button class="btn small primary btnFoodSpend">记一笔吃饭</button>
+      </div>
+      <div class="grid2" style="margin-top:10px;">
+        <div><div class="label">当月可用（本月剩余）</div><div class="mono">¥ 1,120</div></div>
+        <div><div class="label">今日预算剩余（今日还能花）</div><div class="mono">¥ 40</div></div>
+        <div><div class="label">当月结余（累计，不含今日预算）</div><div class="mono">¥ 0</div></div>
+      </div>
+      <div class="hint">说明：今日预算剩余=今日预算-今日已花；当月结余=到今天为止累计结余（不含今日预算）；当月可用=当月总预算（按设置逐日累加）- 本月累计吃饭支出。</div>
+    </div><div class="card">
+      <div class="row">
+        <div>
+          <p class="h">本月游玩 / 药品 / 网费 / 日用</p>
+          <p class="sub">直接在上面的“随手记”输入金额，这里会自动扣减</p>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:10px;">
+        
+        <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="row" style="align-items:flex-start;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <div class="mono" style="font-weight:900">游玩</div>
+              <div class="sub">剩余 100%</div>
+            </div>
+            <div class="mono">¥ 100 / ¥ 100</div>
+          </div>
+          
+        </div>
+      
+        <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="row" style="align-items:flex-start;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <div class="mono" style="font-weight:900">药品</div>
+              <div class="sub">剩余 100%</div>
+            </div>
+            <div class="mono">¥ 500 / ¥ 500</div>
+          </div>
+          
+        </div>
+      
+        <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="row" style="align-items:flex-start;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <div class="mono" style="font-weight:900">网费</div>
+              <div class="sub">剩余 100%</div>
+            </div>
+            <div class="mono">¥ 110 / ¥ 110</div>
+          </div>
+          
+        </div>
+      
+        <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="row" style="align-items:flex-start;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <div class="mono" style="font-weight:900">日用</div>
+              <div class="sub">剩余 100%</div>
+            </div>
+            <div class="mono">¥ 100 / ¥ 100</div>
+          </div>
+          
+        </div>
+      
+      </div>
+    </div><div class="card">
+      <div class="row">
+        <div>
+          <p class="h">本月水果 / 零食</p>
+          <p class="sub">直接在上面的“随手记”输入金额，这里会自动扣减</p>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:10px;">
+        
+        <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="row" style="align-items:flex-start;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <div class="mono" style="font-weight:900">水果</div>
+              <div class="sub">剩余 100%</div>
+            </div>
+            <div class="mono">¥ 100 / ¥ 100</div>
+          </div>
+          <div style="margin-top:6px;"><div class="row" style="justify-content:space-between; margin-top:4px;">
+          <span class="sub">当周可用</span>
+          <span class="mono" style="font-weight:900; color:rgba(15,23,42,.66)">¥ 23</span>
+        </div><div class="row" style="justify-content:space-between; margin-top:4px;">
+          <span class="sub">当月结余</span>
+          <span class="mono" style="font-weight:900; color:rgba(15,23,42,.66)">¥ 0</span>
+        </div></div>
+        </div>
+      
+        <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="row" style="align-items:flex-start;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <div class="mono" style="font-weight:900">零食</div>
+              <div class="sub">剩余 100%</div>
+            </div>
+            <div class="mono">¥ 100 / ¥ 100</div>
+          </div>
+          <div style="margin-top:6px;"><div class="row" style="justify-content:space-between; margin-top:4px;">
+          <span class="sub">当周可用</span>
+          <span class="mono" style="font-weight:900; color:rgba(15,23,42,.66)">¥ 23</span>
+        </div><div class="row" style="justify-content:space-between; margin-top:4px;">
+          <span class="sub">当月结余</span>
+          <span class="mono" style="font-weight:900; color:rgba(15,23,42,.66)">¥ 0</span>
+        </div></div>
+        </div>
+      
+      </div>
+    </div><div class="card">
+      <div class="row">
+        <div>
+          <p class="h">最近 3 笔</p>
+          <p class="sub">更多明细去“历史”</p>
+        </div>
+        <button class="btn small" data-act="toHistory">去历史</button>
+      </div>
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
+        <div class="sub">还没有任何记录。</div>
+      </div>
+    </div></div></div>
+
+      <div class="nav" role="tablist">
+        <button data-tab="ledger" data-active="1">账本</button>
+        <button data-tab="voice" data-active="0">语音</button>
+        <button data-tab="settings" data-active="0">设置</button>
+        <button data-tab="history" data-active="0">历史</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panelShell" id="rightPanelShell">
+  <div class="panel" id="rightPanelFloating">
+    <div class="row">
+      <div>
+        <h1>可点击网页原型（模拟 iPhone App）</h1>
+        <p>你现在就能点着试：记账、改预算、历史记录。</p>
+      </div>
+      <span class="pill">午/晚/夜宵可互相“抄”：按吃饭总余额扣，不强制单餐上限</span>
+    </div>
+    <ul>
+      <li>语音页：先输入/口述一句（这里用文本代替语音），会先解析再让你点“确认执行”。</li>
+      <li>账本页：每个类别显示剩余金额 + 进度条；吃饭按天结余并在月内滚动累计。</li>
+      <li>“模拟”按钮：你可以点来模拟新一天/新一周/月底结算，验证结转逻辑。</li>
+    </ul>
+    <div class="row" style="margin-top:12px;">
+      <button class="btn small" id="resetAll">清空数据重来</button>
+      <button class="btn small" id="restoreBackup">从备份恢复</button>
+      <span class="pill" id="storeState">本地保存：开启</span>
+    </div>
+    <!-- 右侧工具区：把“模拟新一天/新一周/新一月”移到这里，避免在手机框里占位置 -->
+    <div id="sideSimMount" style="margin-top:12px;"><div class="card">
+      <div class="row">
+        <div>
+          <p class="h" style="margin:0;">测试工具（模拟切周期）</p>
+          <p class="sub" style="margin:4px 0 0 0;">用于验证：日结转 / 周结转 / 月底生成图表</p>
+        </div>
+        <span class="pill">常显</span>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+        <button class="btn small" id="simDay">模拟新一天</button>
+        <button class="btn small" id="simWeek">模拟新一周</button>
+        <button class="btn small danger" id="simMonth">模拟新月份</button>
+      </div>
+      <div class="hint">当前App日期：<span class="mono">2026-09-01</span>｜本月：<span class="mono">2026-09</span>｜本周：<span class="mono">2026-08-31</span>（模拟时间）</div>
+    </div></div>
+  </div>
+  </div>
+</div>
+
+<div class="modalBack" id="modalBack" role="dialog" aria-modal="true">
+  <div class="modal" id="modal">
+    <h2 id="modalTitle">—</h2>
+    <div class="hr"></div>
+    <div id="modalBody"></div>
+    <div class="actions" id="modalActions"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" style="display: none;">已进入新月份（上月已结算入池）</div>
+
+<script>
+(() => {
+  const LS_KEY = 'budget_voice_prototype_v1';
+  // 把 AI Key/Model 单独存一份：即使你点“清空数据重来”，也不需要重新粘贴 Key
+  const LS_AI_KEY = LS_KEY + '_aiKey';
+  const LS_AI_MODEL = LS_KEY + '_aiModel';
+  // 时间校准：解决手机/电脑系统时间不准导致的“昨天/今天”日期错误
+  const LS_TIME_OFFSET_MS = LS_KEY + '_timeOffsetMs';
+  const LS_TIME_SYNC_AT = LS_KEY + '_timeSyncAt';
+  // 模拟时间：用于测试“滚动到下一天/周/月”时逻辑是否正确（不改系统时间）
+  const LS_SIM_SHIFT_MS = LS_KEY + '_simShiftMs';
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+  let TIME_OFFSET_MS = Number(localStorage.getItem(LS_TIME_OFFSET_MS) || 0);
+  if(!isFinite(TIME_OFFSET_MS)) TIME_OFFSET_MS = 0;
+  let SIM_SHIFT_MS = Number(localStorage.getItem(LS_SIM_SHIFT_MS) || 0);
+  if(!isFinite(SIM_SHIFT_MS)) SIM_SHIFT_MS = 0;
+  const now = () => new Date(Date.now() + TIME_OFFSET_MS + SIM_SHIFT_MS);
+  function timeSourceLabel(){
+    if(SIM_SHIFT_MS) return '模拟时间';
+    return TIME_OFFSET_MS ? '网络校准' : '系统时间';
+  }
+  function clearTimeOffset(){
+    TIME_OFFSET_MS = 0;
+    try{
+      localStorage.removeItem(LS_TIME_OFFSET_MS);
+      localStorage.removeItem(LS_TIME_SYNC_AT);
+    }catch(e){}
+  }
+  function clearSimShift(){
+    SIM_SHIFT_MS = 0;
+    try{
+      localStorage.removeItem(LS_SIM_SHIFT_MS);
+    }catch(e){}
+  }
+  function bumpSimByMs(deltaMs){
+    const d = Number(deltaMs || 0);
+    if(!isFinite(d) || !d) return;
+    SIM_SHIFT_MS = Number(SIM_SHIFT_MS || 0) + d;
+    try{ localStorage.setItem(LS_SIM_SHIFT_MS, String(SIM_SHIFT_MS)); }catch(e){}
+  }
+  function addMonthsPreserveDay(baseDate, add){
+    const d = new Date(baseDate);
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    const day = d.getDate();
+    const hh = d.getHours(), mm = d.getMinutes(), ss = d.getSeconds(), ms = d.getMilliseconds();
+    const targetMonth = m + Number(add || 0);
+    const daysInTarget = new Date(y, targetMonth + 1, 0).getDate();
+    const dd = Math.min(day, daysInTarget);
+    return new Date(y, targetMonth, dd, hh, mm, ss, ms);
+  }
+  // 防呆：如果“设备系统时间正常（>=2025）”但“校准后的时间跑偏到很早/很晚”，直接清空 offset
+  try{
+    const baseYear = new Date().getFullYear();
+    const appYear = now().getFullYear();
+    const baseOk = baseYear >= 2025 && baseYear <= 2035;
+    const appOk = appYear >= 2025 && appYear <= 2035;
+    if(baseOk && !appOk){
+      clearTimeOffset();
+      clearSimShift();
+    }
+  }catch(e){}
+  async function syncTimeFromNet(){
+    // 取网络时间，算出 offset；失败则不改变
+    const tz = (() => {
+      try{ return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'; }catch(e){ return 'Asia/Shanghai'; }
+    })();
+    // 1) timeapi.io
+    try{
+      const u = `https://timeapi.io/api/Time/current/zone?timeZone=${encodeURIComponent(tz)}`;
+      const r = await fetch(u, { method:'GET' });
+      const t = await r.text();
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = JSON.parse(t);
+      const dt = j?.dateTime || j?.dateTimeString || j?.dateTimeUtc || '';
+      const ms = Date.parse(dt);
+      if(!isFinite(ms)) throw new Error('bad datetime');
+      TIME_OFFSET_MS = ms - Date.now();
+      localStorage.setItem(LS_TIME_OFFSET_MS, String(TIME_OFFSET_MS));
+      localStorage.setItem(LS_TIME_SYNC_AT, new Date().toISOString());
+      return { ok:true, source:'timeapi.io', tz };
+    }catch(e){}
+    // 2) worldtimeapi（备用）
+    try{
+      const u = `https://worldtimeapi.org/api/timezone/${encodeURIComponent(tz)}`;
+      const r = await fetch(u, { method:'GET' });
+      const t = await r.text();
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = JSON.parse(t);
+      const unixtime = Number(j?.unixtime || 0);
+      if(!unixtime) throw new Error('bad unixtime');
+      const ms = unixtime * 1000;
+      TIME_OFFSET_MS = ms - Date.now();
+      localStorage.setItem(LS_TIME_OFFSET_MS, String(TIME_OFFSET_MS));
+      localStorage.setItem(LS_TIME_SYNC_AT, new Date().toISOString());
+      return { ok:true, source:'worldtimeapi.org', tz };
+    }catch(e){}
+    return { ok:false, error:'网络校准失败（可能无网或被浏览器拦截/CORS）' };
+  }
+  function autoSyncTimeIfNeeded(){
+    // 如果设备年份明显不对（比如 2023/1900），自动尝试网络校准一次
+    try{
+      const y = new Date().getFullYear();
+      if(y < 2025 || y > 2035){
+        // 不阻塞主流程
+        syncTimeFromNet().then(()=>{ /* silent */ }).catch(()=>{});
+      }
+    }catch(e){}
+  }
+  const pad2 = n => String(n).padStart(2,'0');
+  const ymd = (d=new Date()) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const ym = (d=new Date()) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}`;
+  const money = n => {
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(Math.round(n));
+    return sign + abs.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  };
+
+  function maskKey(k){
+    if(!k) return '';
+    if(k.length <= 8) return '***';
+    return k.slice(0,4) + '...' + k.slice(-4);
+  }
+
+  function startOfWeekMonday(d){
+    const x = new Date(d);
+    const day = x.getDay(); // 0 Sun
+    const diff = (day === 0 ? -6 : 1 - day);
+    x.setDate(x.getDate() + diff);
+    x.setHours(0,0,0,0);
+    return x;
+  }
+  function weekKey(d){ return ymd(startOfWeekMonday(d)); } // monday date
+
+  function defaultState(){
+    const today = now();
+    const monthKey = ym(today);
+    const wk = weekKey(today);
+    const savedKey = localStorage.getItem(LS_AI_KEY) || '';
+    const savedModel = localStorage.getItem(LS_AI_MODEL) || 'openai/gpt-4o-mini';
+    return {
+      meta: { createdAt: today.toISOString(), monthKey, weekKey: wk },
+      // Budgets configured by user
+      budgets: {
+        // 吃饭日预算：工作日/周末分开
+        food_daily: {
+          weekday: { lunch: 25, dinner: 15, supper: 0 },
+          weekend: { lunch: 20, dinner: 10, supper: 0 }
+        },
+        week: {}, // 预留给“按周”的自定义类别
+        // 按月固定预算（你常用的固定项）
+        month: { med: 500, fun: 100, net: 110, daily: 100, snack: 100, fruit: 100 },
+        // 自定义类别（可新增）
+        categoriesExtra: [] // {id,name,cycle,amount}
+      },
+      // AI 配置（用于“语音解析”）
+      ai: {
+        provider: 'openrouter',
+        apiKey: savedKey,
+        model: savedModel,
+        lastTestOk: false,
+        lastTestAt: null
+      },
+      // Spend/Income transactions
+      txns: [],
+      // Running balances for current cycles
+      cycles: {
+        month: {
+          key: monthKey,
+          // calculated monthly totals (month total is sum of category budgets, but "food" is rolling balance)
+          monthBudgetManual: null, // optional override (not used by default)
+          // 水果/零食：按周结算后的“累计结余”（仅周结束才会变化）
+          weekCarry: { fruit: 0, snack: 0 },
+          // food: rolling within month
+          food: {
+            // 解释：monthBalance 是“本月吃饭滚动余额”，每天开始会 + 当天日预算；记账会扣减
+            dayStartBalance: 0, // 今天开始时的余额（= 昨日结转）
+            todaySpent: 0,
+            monthBalance: 0,
+            todayKey: ymd(today)
+          },
+          // weekly categories are tracked as their own cycles; month just aggregates for display
+          monthPoolAtStart: 0
+        },
+        week: {
+          key: wk
+        },
+        pool: {
+          total: 0, // 结转池：日/周结余会临时累计；月底按“月总剩余”收口
+          monthStartTotal: 0, // 本月开始时的池子底数；月底会用它 + 月总剩余做最终收口
+          overdrafts: { day:{}, week:{}, month:{} }, // 记录“已从池子扣过多少超支”，避免重复扣
+          // optional: keep last settlement snapshots
+          settlements: [] // {type:'day'|'week'|'month'|'overspend', key, delta, at, label?}
+        }
+      }
+    };
+  }
+
+  function load(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(!raw) return null;
+      return JSON.parse(raw);
+    }catch(e){
+      return null;
+    }
+  }
+  function save(){
+    const raw = JSON.stringify(state);
+    localStorage.setItem(LS_KEY, raw);
+    // 额外备份一份，避免你更新页面后“感觉数据没了”
+    localStorage.setItem(LS_KEY + '_backup', raw);
+    // 单独保存 AI 配置（避免 resetAll 误删）
+    try{
+      localStorage.setItem(LS_AI_KEY, state?.ai?.apiKey || '');
+      localStorage.setItem(LS_AI_MODEL, state?.ai?.model || 'openai/gpt-4o-mini');
+    }catch(e){}
+  }
+
+  function toast(msg){
+    const t = $('#toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(toast._id);
+    toast._id = setTimeout(()=> t.style.display='none', 1400);
+  }
+
+  async function testOpenRouter(apiKey, model){
+    const url = 'https://openrouter.ai/api/v1/chat/completions';
+    const payload = {
+      model,
+      messages: [{ role: 'user', content: 'Reply with OK only.' }],
+      max_tokens: 4,
+      temperature: 0
+    };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        // OpenRouter 推荐的可选头（不影响功能）
+        'HTTP-Referer': 'http://localhost',
+        'X-Title': 'BudgetVoicePrototype'
+      },
+      body: JSON.stringify(payload)
+    });
+    const text = await res.text();
+    if(!res.ok){
+      return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 200)}` };
+    }
+    try{
+      const json = JSON.parse(text);
+      const content = json?.choices?.[0]?.message?.content || '';
+      return { ok: true, content };
+    }catch(e){
+      return { ok: false, error: '返回不是JSON（可能被浏览器拦截/CORS）' };
+    }
+  }
+
+  // --- State
+  let state = load() || defaultState();
+
+  function migrateState(){
+    // 1) 兼容旧版 food_daily: {lunch,dinner,supper}
+    if(state?.budgets?.food_daily && typeof state.budgets.food_daily.lunch === 'number'){
+      const old = state.budgets.food_daily;
+      state.budgets.food_daily = {
+        weekday: { lunch: Number(old.lunch||0), dinner: Number(old.dinner||0), supper: Number(old.supper||0) },
+        weekend: { lunch: Number(old.lunch||0), dinner: Number(old.dinner||0), supper: Number(old.supper||0) }
+      };
+    }
+    // 2) 兼容旧版 month.food: carryFromYesterday
+    if(state?.cycles?.month?.food && typeof state.cycles.month.food.carryFromYesterday === 'number'){
+      const f = state.cycles.month.food;
+      state.cycles.month.food = {
+        dayStartBalance: Number(f.carryFromYesterday || 0),
+        todaySpent: Number(f.todaySpent || 0),
+        monthBalance: Number(f.monthBalance || 0),
+        todayKey: f.todayKey || ymd(now())
+      };
+    }
+    // 3) AI 默认配置
+    if(!state.ai){
+      state.ai = { provider:'openrouter', apiKey:'', model:'openai/gpt-4o-mini', lastTestOk:false, lastTestAt:null };
+    }
+    // 4) 餐别时间段（可在设置里改）
+    // 新规则：用“分界点”更直观：
+    // 05:00–10:30 = 早餐；10:30–15:00 = 午餐；15:00–21:00 = 晚餐；21:00–次日05:00 = 夜宵
+    if(!state.meta.mealRanges || state.meta.mealRanges.lunchStart){
+      state.meta.mealRanges = {
+        supperEnd: '05:00',     // 夜宵结束（次日）
+        breakfastEnd: '10:30',  // 早餐结束
+        lunchEnd: '15:00',      // 午餐结束（3点）
+        dinnerEnd: '21:00'      // 晚餐结束（9点）
+      };
+    }
+
+    // 5) “日用”从自定义类别提升为内置按月固定项（保持用户旧数据不丢）
+    if(!state.budgets.month) state.budgets.month = {};
+    if(typeof state.budgets.month.daily !== 'number') state.budgets.month.daily = 100;
+    if(Array.isArray(state.budgets.categoriesExtra)){
+      const idx = state.budgets.categoriesExtra.findIndex(x => x && (x.id === 'daily_use' || x.name === '日用'));
+      if(idx >= 0){
+        const x = state.budgets.categoriesExtra[idx];
+        // 如果旧日用有预算，就迁移到 month.daily
+        const amt = Number(x?.amount || 0);
+        if(isFinite(amt) && amt > 0) state.budgets.month.daily = amt;
+        // 从自定义列表移除
+        state.budgets.categoriesExtra.splice(idx, 1);
+      }
+    }
+
+    // 6) 兼容：水果/零食 周结余累计
+    if(!state?.cycles?.month?.weekCarry){
+      if(!state.cycles) state.cycles = {};
+      if(!state.cycles.month) state.cycles.month = { key: ym(now()), food: { dayStartBalance:0, todaySpent:0, monthBalance:0, todayKey: ymd(now()) } };
+      state.cycles.month.weekCarry = { fruit: 0, snack: 0 };
+    }else{
+      if(typeof state.cycles.month.weekCarry.fruit !== 'number') state.cycles.month.weekCarry.fruit = 0;
+      if(typeof state.cycles.month.weekCarry.snack !== 'number') state.cycles.month.weekCarry.snack = 0;
+    }
+    // 7) 兼容：结转池新增“月初底数 / 超支扣减记录”
+    if(!state?.cycles?.pool) state.cycles.pool = { total: 0, monthStartTotal: 0, overdrafts: { day:{}, week:{}, month:{} }, settlements: [] };
+    if(typeof state.cycles.pool.total !== 'number' || !isFinite(state.cycles.pool.total)) state.cycles.pool.total = 0;
+    if(typeof state.cycles.pool.monthStartTotal !== 'number' || !isFinite(state.cycles.pool.monthStartTotal)){
+      state.cycles.pool.monthStartTotal = Number(state.cycles.pool.total || 0);
+    }
+    if(!state.cycles.pool.overdrafts) state.cycles.pool.overdrafts = { day:{}, week:{}, month:{} };
+    if(!state.cycles.pool.overdrafts.day) state.cycles.pool.overdrafts.day = {};
+    if(!state.cycles.pool.overdrafts.week) state.cycles.pool.overdrafts.week = {};
+    if(!state.cycles.pool.overdrafts.month) state.cycles.pool.overdrafts.month = {};
+    if(!Array.isArray(state.cycles.pool.settlements)) state.cycles.pool.settlements = [];
+  }
+
+  migrateState();
+  save();
+  autoSyncTimeIfNeeded();
+
+  function updateMonthlyStatsForTxn(tx, oldAmount = 0) {
+    if (!state.monthlyStats || state.monthlyStats.length === 0) return;
+    
+    // 找到该账单所属的月份报表
+    const statIndex = state.monthlyStats.findIndex(s => s.monthKey === tx.monthKey);
+    if (statIndex === -1) return;
+
+    // 只有支出影响报表（收入目前原型暂不统计）
+    if (tx.kind === 'expense') {
+      const diff = Number(tx.amount || 0) - Number(oldAmount || 0);
+      state.monthlyStats[statIndex].spent += diff;
+      state.monthlyStats[statIndex].saved -= diff;
+    }
+  }
+  function isWeekend(d){
+    const day = d.getDay(); // 0 Sun, 6 Sat
+    return day === 0 || day === 6;
+  }
+
+  function timeToMin(hhmm){
+    const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+    if(!m) return 0;
+    return Number(m[1]) * 60 + Number(m[2]);
+  }
+
+  function guessMealByTime(d){
+    const r = state.meta.mealRanges || {};
+    const t = d.getHours() * 60 + d.getMinutes();
+    const supperEnd = timeToMin(r.supperEnd || '05:00');
+    const breakfastEnd = timeToMin(r.breakfastEnd || '10:30');
+    const lunchEnd = timeToMin(r.lunchEnd || '15:00');
+    const dinnerEnd = timeToMin(r.dinnerEnd || '21:00');
+    // 夜宵：21:00–次日05:00（跨天）
+    if(t < supperEnd || t >= dinnerEnd) return 'supper';
+    // 05:00–10:30 早餐
+    if(t < breakfastEnd) return 'breakfast';
+    // 10:30–15:00 午餐
+    if(t < lunchEnd) return 'lunch';
+    // 15:00–21:00 晚餐
+    return 'dinner';
+  }
+
+  function foodBudgetForDate(d){
+    const f = state.budgets.food_daily;
+    const src = isWeekend(d) ? (f.weekend || f.weekday) : (f.weekday || f.weekend);
+    const lunch = Number(src?.lunch || 0);
+    const dinner = Number(src?.dinner || 0);
+    const supper = Number(src?.supper || 0);
+    return { lunch, dinner, supper, total: lunch + dinner + supper };
+  }
+
+  function foodMonthBudgetForMonth(d){
+    // 按“设置里取的工作日/周末预算”，精确遍历当月天数求和
+    const year = d.getFullYear();
+    const month = d.getMonth(); // 0-11
+    const days = new Date(year, month + 1, 0).getDate();
+    let total = 0;
+    for(let i=1; i<=days; i++){
+      const x = new Date(year, month, i);
+      total += foodBudgetForDate(x).total;
+    }
+    return total;
+  }
+
+  function recalcFoodForToday(){
+    // 预算被修改后，用“今天开始余额 + 今天预算 - 今天已花”重算 monthBalance
+    const food = state.cycles.month.food;
+    const budgetTotal = foodBudgetForDate(now()).total;
+    food.monthBalance = Number(food.dayStartBalance || 0) + budgetTotal - Number(food.todaySpent || 0);
+    if(!isFinite(food.monthBalance)) food.monthBalance = 0;
+  }
+
+  function monthDateFromKey(monthKey){
+    const m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+    if(!m) return null;
+    return { year: Number(m[1]), month: Number(m[2]) - 1 };
+  }
+
+  function foodMonthBudgetForMonthKey(monthKey){
+    const info = monthDateFromKey(monthKey);
+    if(!info) return 0;
+    const days = new Date(info.year, info.month + 1, 0).getDate();
+    let total = 0;
+    for(let i=1; i<=days; i++){
+      total += foodBudgetForDate(new Date(info.year, info.month, i)).total;
+    }
+    return total;
+  }
+
+  function monthTotalsEstimateByKey(monthKey){
+    const baseFood = foodMonthBudgetForMonthKey(monthKey);
+    const month = state.budgets.month;
+    const extras = state.budgets.categoriesExtra || [];
+    const extraMonth = extras.filter(x => x.cycle==='month').reduce((s,x)=> s + Number(x.amount||0), 0);
+    const extraWeek = extras.filter(x => x.cycle==='week').reduce((s,x)=> s + Number(x.amount||0), 0);
+    const extraDay = extras.filter(x => x.cycle==='day').reduce((s,x)=> s + Number(x.amount||0), 0);
+    const weekBase = extraWeek * 4;
+    const monthBase = Number(month.med||0) + Number(month.fun||0) + Number(month.net||0) + Number(month.daily||0) + Number(month.snack||0) + Number(month.fruit||0) + extraMonth;
+    const dayBase = extraDay * 30;
+    return baseFood + weekBase + monthBase + dayBase;
+  }
+
+  function calcMonthTotalRemainingByKey(monthKey){
+    const total = monthTotalsEstimateByKey(monthKey);
+    const used = state.txns
+      .filter(t => t.kind==='expense' && t.monthKey===monthKey)
+      .reduce((s,t)=> s + Number(t.amount||0), 0);
+    return { total, used, remain: total - used };
+  }
+
+  function applyPoolDelta(delta, type, key, label=''){
+    // 结转池已被废弃，不执行任何操作
+  }
+
+  function syncPoolOverdraft(bucket, catId, key, overspend, label){
+    // 结转池已被废弃，不执行任何操作
+  }
+
+  function recalcOverdraftForTxn(tx) {
+    // 结转池已被废弃，不再计算超支
+    return;
+  }
+
+  function monthTotalsEstimate(){
+    // We treat month total as sum of category budgets.
+    // 对“吃饭”改为按当月真实天数精算（按设置逐日累加）
+    const baseFood = foodMonthBudgetForMonth(now());
+    const week = state.budgets.week || {};
+    const month = state.budgets.month;
+    const extras = state.budgets.categoriesExtra || [];
+    const extraMonth = extras.filter(x => x.cycle==='month').reduce((s,x)=> s + Number(x.amount||0), 0);
+    const extraWeek = extras.filter(x => x.cycle==='week').reduce((s,x)=> s + Number(x.amount||0), 0);
+    const extraDay = extras.filter(x => x.cycle==='day').reduce((s,x)=> s + Number(x.amount||0), 0);
+    // week budgets estimated *4
+    const weekBase = (extraWeek) * 4;
+    const monthBase = Number(month.med||0) + Number(month.fun||0) + Number(month.net||0) + Number(month.daily||0) + Number(month.snack||0) + Number(month.fruit||0) + extraMonth;
+    const dayBase = extraDay * 30;
+    return baseFood + weekBase + monthBase + dayBase;
+  }
+
+  function ensureToday(){
+    const todayKey = ymd(now());
+    if(state.cycles.month.food.todayKey !== todayKey){
+      // 时间追溯补账（Catch-up）机制：计算跳过的天数
+      const food = state.cycles.month.food;
+      const prevDayKey = food.todayKey;
+      if (prevDayKey) {
+        let current = new Date(prevDayKey);
+        current.setDate(current.getDate() + 1);
+        const target = new Date(todayKey);
+        
+        // 追溯中间跳过的每一天，累加预算（跳过补记花费，因为没登录意味着没记账）
+        while (current < target) {
+          const missedDateStr = ymd(current);
+          if (ym(current) === state.cycles.month.key) { // 仅累加同月份的跳过日期
+            const missedBudget = foodBudgetForDate(current).total;
+            food.monthBalance = Number(food.monthBalance || 0) + missedBudget;
+          }
+          current.setDate(current.getDate() + 1);
+        }
+      }
+      food.dayStartBalance = Number(food.monthBalance || 0);
+      const budget = foodBudgetForDate(now());
+      food.todaySpent = 0;
+      food.todayKey = todayKey;
+      food.monthBalance = Number(food.monthBalance || 0) + budget.total;
+      toast('已进入新一天（包含追溯补账）');
+      save();
+    }
+  }
+
+  function ensureWeek(){
+    const wk = weekKey(now());
+    if(state.cycles.week.key !== wk){
+      const prevWk = state.cycles.week.key;
+      const mk = state.cycles.month.key;
+      
+      // 时间追溯补账（Catch-up）机制：计算跳过的周数
+      if(prevWk) {
+        let currentWkStr = prevWk;
+        const wkFactor = 52/12;
+        const weeklyFruit = Math.round(Number(state.budgets.month.fruit||0) / wkFactor);
+        const weeklySnack = Math.round(Number(state.budgets.month.snack||0) / wkFactor);
+        
+        while (currentWkStr !== wk) {
+          // 只累加属于当前月份的周
+          const monthWeeks = weekKeysInMonth(mk);
+          if (monthWeeks.includes(currentWkStr)) {
+            const spentFruitPrev = sumSpentWeekInMonth('fruit', currentWkStr, mk);
+            const spentSnackPrev = sumSpentWeekInMonth('snack', currentWkStr, mk);
+            const remainFruitPrev = weeklyFruit - spentFruitPrev;
+            const remainSnackPrev = weeklySnack - spentSnackPrev;
+            
+            if(!state.cycles.month.weekCarry) state.cycles.month.weekCarry = { fruit: 0, snack: 0 };
+            if(remainFruitPrev > 0) state.cycles.month.weekCarry.fruit = Number(state.cycles.month.weekCarry.fruit||0) + remainFruitPrev;
+            if(remainSnackPrev > 0) state.cycles.month.weekCarry.snack = Number(state.cycles.month.weekCarry.snack||0) + remainSnackPrev;
+          }
+          
+          // 计算下一周的 weekKey
+          const parts = currentWkStr.split('-W');
+          if (parts.length === 2) {
+            let y = Number(parts[0]);
+            let w = Number(parts[1]);
+            let nextW = w + 1;
+            let nextY = y;
+            if (nextW > 52) { // 简单假设52周，原型够用
+              nextW = 1;
+              nextY = y + 1;
+            }
+            currentWkStr = `${nextY}-W${nextW.toString().padStart(2, '0')}`;
+          } else {
+            break;
+          }
+          
+          // 防止死循环保险
+          if (Number(currentWkStr.split('-W')[0]) > 2030) break; 
+        }
+      }
+
+      // reset week
+      state.cycles.week.key = wk;
+      const extras = categoryList().filter(c => c.cycle === 'week');
+      for(const c of extras){
+        state.cycles.week[c.id] = { spent: 0 };
+      }
+      if(state.cycles.pool.overdrafts?.week){
+        state.cycles.pool.overdrafts.week = {};
+      }
+      toast('已进入新一周（包含追溯补账）');
+      save();
+    }
+  }
+
+  function ensureMonth(){
+    const mk = ym(now());
+    if(state.cycles.month.key !== mk){
+      // 月底结算：直接按“首页月总剩余”收口；之前的日/周过程池在这里统一清掉
+      settleMonth();
+      // reset month cycle
+      state.cycles.month.key = mk;
+      state.meta.monthKey = mk;
+      // 新月份：清空“水果/零食 当月结余”（只在当月内累计，跨月不延续）
+      state.cycles.month.weekCarry = { fruit: 0, snack: 0 };
+      state.cycles.month.food.dayStartBalance = 0;
+      const budget = foodBudgetForDate(now());
+      state.cycles.month.food.todaySpent = 0;
+      state.cycles.month.food.todayKey = ymd(now());
+      state.cycles.month.food.monthBalance = budget.total;
+      state.cycles.pool.monthStartTotal = 0; // 跨月清零后，池底就是 0
+      if(state.cycles.pool.overdrafts){
+        state.cycles.pool.overdrafts.day = {};
+        state.cycles.pool.overdrafts.week = {};
+        state.cycles.pool.overdrafts.month = {};
+      }
+      // reset week key for new month (still based on actual week)
+      ensureWeek();
+      toast('已进入新月份（结余已清零）');
+      save();
+    }
+  }
+
+  function categoryList(){
+    const extras = state.budgets.categoriesExtra || [];
+    // base categories
+    return [
+      {id:'food', name:'吃饭', cycle:'day', sub:['午餐','晚餐','夜宵']},
+      {id:'fruit', name:'水果', cycle:'month'},
+      {id:'fun', name:'游玩', cycle:'month'},
+      {id:'med', name:'药品', cycle:'month'},
+      {id:'snack', name:'零食', cycle:'month'},
+      {id:'net', name:'网费', cycle:'month'},
+      {id:'daily', name:'日用', cycle:'month'},
+      ...extras.map(x => ({id: x.id, name: x.name, cycle: x.cycle}))
+    ];
+  }
+
+  function calcRemainingForCategory(catId){
+    // Returns {remain, total, used, cycle, label}
+    ensureToday(); ensureWeek(); ensureMonth();
+    const cats = categoryList();
+    const cat = cats.find(x => x.id === catId);
+    if(!cat) return null;
+    if(catId === 'food'){
+      const food = state.cycles.month.food;
+      const totalToday = Number(food.dayStartBalance || 0) + Number(foodBudgetForDate(now()).total || 0);
+      const remainToday = Number(food.monthBalance || 0);
+      return {
+        remain: remainToday,
+        total: totalToday,
+        used: food.todaySpent,
+        cycle: 'day',
+        label: '今天吃饭可用'
+      };
+    }
+    if(cat.cycle === 'week'){
+      const budget = Number(state.budgets.week[catId] || 0) + extraBudget(catId);
+      const spent = Number(state.cycles.week[catId]?.spent || 0);
+      return { remain: budget - spent, total: budget, used: spent, cycle:'week', label:'本周' + cat.name };
+    }
+    if(cat.cycle === 'month'){
+      const budget = Number(state.budgets.month[catId] || 0) + extraBudget(catId);
+      const spent = sumSpentMonth(catId);
+      return { remain: budget - spent, total: budget, used: spent, cycle:'month', label:'本月' + cat.name };
+    }
+    if(cat.cycle === 'day'){
+      // extra day-category: daily fixed, but you didn't request additional day categories besides food. Still support.
+      const budget = extraBudget(catId);
+      const spent = sumSpentDay(catId);
+      return { remain: budget - spent, total: budget, used: spent, cycle:'day', label:'今日' + cat.name };
+    }
+    return null;
+  }
+
+  function extraBudget(catId){
+    const extras = state.budgets.categoriesExtra || [];
+    const x = extras.find(e => e.id === catId);
+    return x ? Number(x.amount || 0) : 0;
+  }
+
+  function sumSpentMonth(catId){
+    const key = state.cycles.month.key;
+    return state.txns
+      .filter(t => t.kind==='expense' && t.category===catId && t.monthKey===key)
+      .reduce((s,t)=> s + Number(t.amount||0), 0);
+  }
+  function sumSpentMonthByKey(catId, monthKey){
+    return state.txns
+      .filter(t => t.kind==='expense' && t.category===catId && t.monthKey===monthKey)
+      .reduce((s,t)=> s + Number(t.amount||0), 0);
+  }
+  function sumSpentWeekByKey(catId, weekK){
+    return state.txns
+      .filter(t => t.kind==='expense' && t.category===catId && t.weekKey===weekK)
+      .reduce((s,t)=> s + Number(t.amount||0), 0);
+  }
+  function weekKeysInMonth(monthKey){
+    // monthKey: YYYY-MM
+    const m = String(monthKey||'').match(/^(\d{4})-(\d{2})$/);
+    if(!m) return [];
+    const year = Number(m[1]);
+    const month = Number(m[2]) - 1; // 0-11
+    const days = new Date(year, month + 1, 0).getDate();
+    const seen = new Set();
+    const keys = [];
+    for(let i=1; i<=days; i++){
+      const d = new Date(year, month, i);
+      const wk = weekKey(d);
+      if(!seen.has(wk)){
+        seen.add(wk);
+        keys.push(wk);
+      }
+    }
+    return keys;
+  }
+  function sumSpentWeekInMonth(catId, weekK, monthKey){
+    return state.txns
+      .filter(t => t.kind==='expense' && t.category===catId && t.weekKey===weekK && t.monthKey===monthKey)
+      .reduce((s,t)=> s + Number(t.amount||0), 0);
+  }
+  function sumSpentDay(catId){
+    const key = ymd(now());
+    return state.txns
+      .filter(t => t.kind==='expense' && t.category===catId && t.date===key)
+      .reduce((s,t)=> s + Number(t.amount||0), 0);
+  }
+
+  function calcMonthTotalRemaining(){
+    // month total is sum of category budgets, and we subtract all expenses in month.
+    // Food is special: its "spent" is tracked in txns too, so we can compute by summing all expenses in month.
+    ensureToday(); ensureWeek(); ensureMonth();
+    const total = monthTotalsEstimate(); // estimate from budgets
+    const key = state.cycles.month.key;
+    const used = state.txns
+      .filter(t => t.kind==='expense' && t.monthKey===key)
+      .reduce((s,t)=> s + Number(t.amount||0), 0);
+    const remain = total - used;
+    return { total, used, remain };
+  }
+
+  function settleMonth(){
+    const monthKey = state.cycles.month.key;
+    
+    // 计算本月总预算与总花费，用于记录历史
+    const totalBudget = monthTotalsEstimateByKey(monthKey);
+    const totalSpent = sumSpentMonthByKeyAll(monthKey);
+    const saved = totalBudget - totalSpent;
+
+    if(!state.monthlyStats) state.monthlyStats = [];
+    state.monthlyStats.push({
+      monthKey,
+      budget: totalBudget,
+      spent: totalSpent,
+      saved: saved
+    });
+
+    save();
+  }
+
+  function sumSpentMonthByKeyAll(monthKey){
+    return state.txns
+      .filter(t => t.kind==='expense' && t.monthKey===monthKey)
+      .reduce((s,t)=> s + Number(t.amount||0), 0);
+  }
+
+  // --- Modal
+  function openModal(title, bodyNode, actions){
+    $('#modalTitle').textContent = title;
+    const b = $('#modalBody');
+    b.innerHTML = '';
+    b.appendChild(bodyNode);
+    const a = $('#modalActions');
+    a.innerHTML = '';
+    actions.forEach(btn => a.appendChild(btn));
+    $('#modalBack').style.display = 'flex';
+  }
+  function closeModal(){
+    $('#modalBack').style.display = 'none';
+  }
+  $('#modalBack').addEventListener('click', (e)=>{
+    if(e.target.id === 'modalBack') closeModal();
+  });
+
+  // --- UI render
+  const screen = $('#screen');
+  const titleEl = $('#screenTitle');
+  const sideSimMount = $('#sideSimMount');
+  const rightPanelShell = $('#rightPanelShell');
+  const rightPanelFloating = $('#rightPanelFloating');
+  let currentTab = 'ledger';
+
+  function syncRightPanelFloating(){
+    if(!rightPanelShell || !rightPanelFloating) return;
+    rightPanelFloating.classList.remove('floatingPanel');
+    rightPanelFloating.style.left = '';
+    rightPanelFloating.style.width = '';
+    rightPanelShell.style.minHeight = '';
+    if(window.innerWidth <= 920) return;
+    const rect = rightPanelShell.getBoundingClientRect();
+    rightPanelShell.style.minHeight = rightPanelFloating.offsetHeight + 'px';
+    rightPanelFloating.style.left = rect.left + 'px';
+    rightPanelFloating.style.width = rect.width + 'px';
+    rightPanelFloating.classList.add('floatingPanel');
+  }
+
+  function renderSideSimulators(){
+    if(!sideSimMount) return;
+    sideSimMount.innerHTML = '';
+    sideSimMount.appendChild(cardSimulators());
+  }
+
+  function render(){
+    ensureMonth(); ensureWeek(); ensureToday();
+    titleEl.textContent = currentTab === 'ledger' ? '账本'
+      : currentTab === 'voice' ? '语音'
+      : currentTab === 'settings' ? '设置'
+      : '历史';
+
+    if(currentTab === 'ledger') renderLedger();
+    if(currentTab === 'voice') renderVoice();
+    if(currentTab === 'settings') renderSettings();
+    if(currentTab === 'history') renderHistory();
+
+    $$('.nav button').forEach(b => b.dataset.active = (b.dataset.tab===currentTab ? '1' : '0'));
+    // 右侧面板里的“模拟工具”保持常驻
+    renderSideSimulators();
+    syncRightPanelFloating();
+  }
+
+  window.addEventListener('resize', syncRightPanelFloating);
+
+  function renderLedger(){
+    const month = calcMonthTotalRemaining();
+    const usedPct = month.total <= 0 ? 0 : Math.max(0, Math.min(100, Math.round((month.used / month.total) * 100)));
+    const remainPct = 100 - usedPct;
+
+    const food = state.cycles.month.food;
+    const totalToday = Number(food.dayStartBalance || 0) + Number(foodBudgetForDate(now()).total || 0);
+    const remainToday = Number(food.monthBalance || 0);
+
+    const snack = calcRemainingForCategory('snack');
+    const fruit = calcRemainingForCategory('fruit');
+    const med = calcRemainingForCategory('med');
+    const fun = calcRemainingForCategory('fun');
+    const net = calcRemainingForCategory('net');
+    const daily = calcRemainingForCategory('daily');
+
+    // 水果/零食：展示“当周可用 + 当月结余（累计）”
+    function attachWeekMonthCarry(catId, monthBudget, it){
+      const wk = state.cycles.week.key;
+      // 本周预算：严格和设置页一致（按 4.33 周/月折算）
+      const wkFactor = 52/12; // 约 4.33
+      const weeklyBudget = Math.round(Number(monthBudget||0) / wkFactor);
+      const mk = state.cycles.month.key;
+      const carry = Number(state.cycles.month.weekCarry?.[catId] || 0);
+      // 当周可用：只按“本周预算 - 本周已花”，不叠加当月结余
+      // 只统计“本月内”的那部分周支出（周跨月时，不把上个月同周的记录带进来）
+      const spentThisWeek = sumSpentWeekInMonth(catId, wk, mk);
+      const weekAvail = weeklyBudget - spentThisWeek;
+      it.lines = [
+        { label: '当周可用', value: weekAvail },
+        { label: '当月结余', value: carry }
+      ];
+      return it;
+    }
+    attachWeekMonthCarry('fruit', state.budgets.month.fruit, fruit);
+    attachWeekMonthCarry('snack', state.budgets.month.snack, snack);
+
+    const wrap = document.createElement('div');
+
+    wrap.appendChild(cardMonth(month, usedPct, remainPct));
+    wrap.appendChild(cardQuickAdd());
+    wrap.appendChild(cardFood(food, totalToday, remainToday));
+    wrap.appendChild(cardTwo('本月游玩 / 药品 / 网费 / 日用', [
+      {name:'游玩', remain: fun.remain, total: fun.total},
+      {name:'药品', remain: med.remain, total: med.total},
+      {name:'网费', remain: net.remain, total: net.total},
+      {name:'日用', remain: daily.remain, total: daily.total},
+    ]));
+    wrap.appendChild(cardTwo('本月水果 / 零食', [
+      {name:'水果', remain: fruit.remain, total: fruit.total, lines: fruit.lines},
+      {name:'零食', remain: snack.remain, total: snack.total, lines: snack.lines},
+    ]));
+
+    // extra categories summary (if any)
+    const extras = categoryList().filter(c => !['food','snack','fruit','med','fun','net','daily'].includes(c.id));
+    if(extras.length){
+      wrap.appendChild(cardExtras(extras));
+    }
+
+    wrap.appendChild(cardRecentTxns());
+    wrap.appendChild(cardPool());
+
+    screen.innerHTML = '';
+    screen.appendChild(wrap);
+  }
+
+  function cardQuickAdd(){
+    const el = document.createElement('div');
+    el.className = 'quick';
+    el.innerHTML = `
+      <div class="row">
+        <div>
+          <p class="h">随手记（直接输入，不用切换）</p>
+          <p class="sub">你只要输入金额按回车（或点一下空白处）：立刻记账；写错就点“撤销上一笔”。</p>
+        </div>
+        <div class="row" style="justify-content:flex-end; gap:10px;">
+          <button class="btn small" data-act="fill">填示例</button>
+          <button class="btn small" data-act="undo">撤销上一笔</button>
+        </div>
+      </div>
+
+      <div class="qtable" aria-label="quick-inputs">
+      <div class="qrow">
+        <div>
+          <span class="qlabel">吃饭</span>
+          <span class="qmeta" data-food-meta>自动：午餐</span>
+        </div>
+        <input class="qinput" data-food-auto inputmode="decimal" placeholder="金额" />
+      </div>
+        <div class="qrow">
+          <div><span class="qlabel">水果</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="fruit" inputmode="decimal" placeholder="金额" />
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">零食</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="snack" inputmode="decimal" placeholder="金额" />
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">游玩</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="fun" inputmode="decimal" placeholder="金额" />
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">药品</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="med" inputmode="decimal" placeholder="金额" />
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">网费</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="net" inputmode="decimal" placeholder="金额" />
+        </div>
+        <div class="qrow">
+          <div><span class="qlabel">日用</span><span class="qmeta">本月</span></div>
+          <input class="qinput" data-cat="daily" inputmode="decimal" placeholder="金额" />
+        </div>
+        <div data-extra-rows></div>
+      </div>
+
+      <div class="hint">吃饭餐别由时间自动判断（你可在设置里改时间段）。自定义类别会自动出现在这里。</div>
+    `;
+
+    setTimeout(()=>{
+      function undo(){
+        const t = state.txns[0];
+        if(!t){
+          toast('没有可撤销的');
+          return;
+        }
+        state.txns.shift();
+
+        // reverse counters similar to addTxn (only for current cycles)
+        if(t.kind === 'expense'){
+          const oldAmount = t.amount;
+          if(t.category === 'food' && t.date === state.cycles.month.food.todayKey){
+            state.cycles.month.food.todaySpent = Math.max(0, state.cycles.month.food.todaySpent - Number(t.amount||0));
+            state.cycles.month.food.monthBalance = Number(state.cycles.month.food.monthBalance||0) + Number(t.amount||0);
+          }
+          if(t.weekKey === state.cycles.week.key){
+            const cat = categoryList().find(c => c.id === t.category);
+            if(cat && cat.cycle === 'week'){
+              if(!state.cycles.week[t.category]) state.cycles.week[t.category] = { spent: 0 };
+              state.cycles.week[t.category].spent = Math.max(0, Number(state.cycles.week[t.category].spent||0) - Number(t.amount||0));
+            }
+          }
+          
+          // 动态回滚历史折线图（撤销等同于将原花费改为0）
+          updateMonthlyStatsForTxn({...t, amount: 0}, oldAmount);
+          
+          recalcOverdraftForTxn(t);
+        }
+        save();
+        toast('已撤销上一笔');
+        render();
+      }
+
+      el.querySelector('[data-act="undo"]').onclick = undo;
+
+      function commit(input, fn){
+        const raw = (input.value || '').trim();
+        if(!raw) return;
+        const v = Number(raw);
+        if(!isFinite(v) || v <= 0){
+          toast('金额不对');
+          return;
+        }
+        input.value = '';
+        fn(v);
+        toast('已记账');
+        render();
+      }
+
+      // 吃饭：一个输入框，按当前时间自动归类到午/晚/夜宵
+      const foodInput = el.querySelector('input[data-food-auto]');
+      const foodMeta = el.querySelector('[data-food-meta]');
+      function mealText(meal){
+        return meal === 'breakfast' ? '早餐'
+          : meal === 'lunch' ? '午餐'
+          : meal === 'dinner' ? '晚餐'
+          : '夜宵';
+      }
+      function updateFoodMeta(){
+        const meal = guessMealByTime(now());
+        if(foodMeta) foodMeta.textContent = '自动：' + mealText(meal);
+      }
+      updateFoodMeta();
+      setInterval(updateFoodMeta, 30 * 1000);
+      if(foodInput){
+        const commitFood = () => commit(foodInput, (v)=> {
+          const meal = guessMealByTime(now());
+          addTxn({ kind:'expense', category:'food', meal, amount:v, date: ymd(now()), note:'随手记' });
+        });
+        foodInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') commitFood(); });
+        foodInput.addEventListener('blur', commitFood);
+        setTimeout(()=> foodInput.focus(), 50);
+      }
+
+      // 其他类别：回车/失焦都可提交
+      el.querySelectorAll('input[data-cat]').forEach(inp => {
+        const cat = inp.dataset.cat;
+        inp.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') commit(inp, (v)=> addTxn({ kind:'expense', category: cat, amount:v, date: ymd(now()), note:'随手记' })); });
+        inp.addEventListener('blur', ()=> commit(inp, (v)=> addTxn({ kind:'expense', category: cat, amount:v, date: ymd(now()), note:'随手记' })));
+      });
+
+      // 自定义类别：动态渲染输入行（直接出现在随手记里）
+      const extraRows = el.querySelector('[data-extra-rows]');
+      const extras = (state.budgets.categoriesExtra || []).slice();
+      const baseIds = new Set(['food','fruit','snack','fun','med','net','income']);
+      const showExtras = extras.filter(x => x && x.id && !baseIds.has(x.id));
+      if(extraRows){
+        if(!showExtras.length){
+          extraRows.innerHTML = ``;
+        } else {
+          extraRows.innerHTML = showExtras.map(x => {
+            const cyc = x.cycle === 'day' ? '今日' : x.cycle === 'week' ? '本周' : '本月';
+            return `
+              <div class="qrow">
+                <div><span class="qlabel">${x.name}</span><span class="qmeta">${cyc}</span></div>
+                <input class="qinput" data-cat="${x.id}" inputmode="decimal" placeholder="金额" />
+              </div>
+            `;
+          }).join('');
+          extraRows.querySelectorAll('input[data-cat]').forEach(inp => {
+            const cat = inp.dataset.cat;
+            inp.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') commit(inp, (v)=> addTxn({ kind:'expense', category: cat, amount:v, date: ymd(now()), note:'随手记(自定义)' })); });
+            inp.addEventListener('blur', ()=> commit(inp, (v)=> addTxn({ kind:'expense', category: cat, amount:v, date: ymd(now()), note:'随手记(自定义)' })));
+          });
+        }
+      }
+
+      el.querySelector('[data-act="fill"]').onclick = ()=>{
+        if(foodInput){ foodInput.value = '28'; foodInput.focus(); }
+      };
+    },0);
+
+    return el;
+  }
+
+  function cardRecentTxns(){
+    const el = document.createElement('div');
+    el.className = 'card';
+    const mk = state.cycles.month.key;
+    const list = state.txns.filter(t => t.monthKey === mk).slice(0, 3);
+    el.innerHTML = `
+      <div class="row">
+        <div>
+          <p class="h">最近 3 笔</p>
+          <p class="sub">更多明细去“历史”</p>
+        </div>
+        <button class="btn small" data-act="toHistory">去历史</button>
+      </div>
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
+        ${
+          list.length
+            ? list.map(t => `
+              <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+                <div class="row">
+                  <div style="display:flex; flex-direction:column;">
+                    <div class="mono" style="font-weight:900">${t.kind==='expense'?'支出':'收入'} · ${categoryName(t.category, t.meal)}</div>
+                    <div class="sub">${t.date} · ${t.note || '—'}</div>
+                  </div>
+                  <div class="mono" style="font-weight:900; color:${t.kind==='expense'?'#dc2626':'#16a34a'}">
+                    ${t.kind==='expense'?'-':'+'}¥ ${money(t.amount)}
+                  </div>
+                </div>
+              </div>
+            `).join('')
+            : `<div class="sub">还没有任何记录。</div>`
+        }
+      </div>
+    `;
+    setTimeout(()=>{
+      const b = el.querySelector('[data-act="toHistory"]');
+      if(b) b.onclick = ()=>{ currentTab='history'; render(); };
+    },0);
+    return el;
+  }
+
+  function cardMonth(month, usedPct, remainPct){
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML = `
+      <div class="row">
+        <div>
+          <p class="h">月总预算（=分类预算汇总）</p>
+          <p class="sub">本月剩余 / 总额 · 百分比</p>
+        </div>
+        <span class="pill">${state.cycles.month.key}</span>
+      </div>
+      <div class="kpi">
+        <div class="big">¥ ${money(month.remain)}</div>
+        <div class="small">已用 ${usedPct}% · 总额 ¥ ${money(month.total)}</div>
+      </div>
+      <div class="bar"><div style="width:${remainPct}%"></div></div>
+    `;
+    return el;
+  }
+
+  function cardFood(food, totalToday, remainToday){
+    const el = document.createElement('div');
+    el.className = 'card';
+    // 吃饭字段口径：
+    // - 当月结余：到“今天开始”为止的累计结余（不含今日预算）
+    // - 今日预算剩余：今日预算 - 今日已花（每天自动更新）
+    const monthCarry = Number(food.dayStartBalance||0);
+    const todayBudget = Number(foodBudgetForDate(now()).total || 0);
+    const todaySpent = Number(food.todaySpent || 0);
+    const todayRemain = todayBudget - todaySpent;
+    const monthBudgetTotal = foodMonthBudgetForMonth(now());
+    const monthSpent = sumSpentMonth('food');
+    const monthRemain = monthBudgetTotal - monthSpent;
+    const mg = guessMealByTime(now());
+    const mealGuess = mg === 'breakfast' ? '早餐' : mg === 'lunch' ? '午餐' : mg === 'dinner' ? '晚餐' : '夜宵';
+    el.innerHTML = `
+      <div class="row">
+        <div>
+          <p class="h">吃饭余额（今天剩余，含结转）</p>
+          <p class="sub">你只填“吃饭金额”，系统按时间自动归类；当前时间会归到：${mealGuess}</p>
+        </div>
+        <button class="btn small primary btnFoodSpend">记一笔吃饭</button>
+      </div>
+      <div class="grid2" style="margin-top:10px;">
+        <div><div class="label">当月可用（本月剩余）</div><div class="mono">¥ ${money(monthRemain)}</div></div>
+        <div><div class="label">今日预算剩余（今日还能花）</div><div class="mono">¥ ${money(todayRemain)}</div></div>
+        <div><div class="label">当月结余（累计，不含今日预算）</div><div class="mono">¥ ${money(monthCarry)}</div></div>
+      </div>
+      <div class="hint">说明：今日预算剩余=今日预算-今日已花；当月结余=到今天为止累计结余（不含今日预算）；当月可用=当月总预算（按设置逐日累加）- 本月累计吃饭支出。</div>
+    `;
+    // bind
+    setTimeout(()=>{
+      const b = el.querySelector('.btnFoodSpend');
+      if(b) b.onclick = () => openTxnModal({kind:'expense', category:'food'});
+    },0);
+    return el;
+  }
+
+  function cardTwo(title, items){
+    const el = document.createElement('div');
+    el.className = 'card';
+    const rows = items.map(it => {
+      const t = Number(it.total||0);
+      const r = Number(it.remain||0);
+      const pct = t<=0 ? 0 : Math.max(0, Math.min(100, Math.round((r/t)*100)));
+      const extra = (it.lines || []).map(x => {
+        const v = Number(x.value || 0);
+        const color = v < 0 ? `color:${getComputedStyle(document.documentElement).getPropertyValue('--danger')}` : `color:${getComputedStyle(document.documentElement).getPropertyValue('--muted')}`;
+        return `<div class="row" style="justify-content:space-between; margin-top:4px;">
+          <span class="sub">${stripHtml(String(x.label||''))}</span>
+          <span class="mono" style="font-weight:900; ${color}">¥ ${money(v)}</span>
+        </div>`;
+      }).join('');
+      return `
+        <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="row" style="align-items:flex-start;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+              <div class="mono" style="font-weight:900">${it.name}</div>
+              <div class="sub">剩余 ${pct}%</div>
+            </div>
+            <div class="mono">¥ ${money(r)} / ¥ ${money(t)}</div>
+          </div>
+          ${extra ? `<div style="margin-top:6px;">${extra}</div>` : ``}
+        </div>
+      `;
+    }).join('');
+    el.innerHTML = `
+      <div class="row">
+        <div>
+          <p class="h">${title}</p>
+          <p class="sub">直接在上面的“随手记”输入金额，这里会自动扣减</p>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:10px;">
+        ${rows}
+      </div>
+    `;
+    return el;
+  }
+
+  function cardExtras(extras){
+    const el = document.createElement('div');
+    el.className = 'card';
+    const lines = extras.map(c => {
+      const r = calcRemainingForCategory(c.id);
+      if(!r) return '';
+      const t = Number(r.total||0);
+      const pct = t<=0 ? 0 : Math.max(0, Math.min(100, Math.round((r.remain/t)*100)));
+      return `
+        <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="row">
+            <div style="display:flex; flex-direction:column;">
+              <div class="mono" style="font-weight:900">${c.name}</div>
+              <div class="sub">周期：${c.cycle==='day'?'日':c.cycle==='week'?'周':'月'}</div>
+            </div>
+            <div class="mono">¥ ${money(r.remain)} / ¥ ${money(r.total)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    el.innerHTML = `
+      <div class="row">
+        <div>
+          <p class="h">自定义类别</p>
+          <p class="sub">你在设置里新增的类别会显示在这里</p>
+        </div>
+        <button class="btn small btnGoSettings">去设置</button>
+      </div>
+      <div class="grid2" style="margin-top:10px;">${lines}</div>
+    `;
+    setTimeout(()=>{
+      const b = el.querySelector('.btnGoSettings');
+      if(b) b.onclick = () => { currentTab='settings'; render(); };
+    },0);
+    return el;
+  }
+
+  function cardPool(){
+    const el = document.createElement('div');
+    el.style.display = 'none';
+    return el;
+  }
+
+  function cardSimulators(){
+    const el = document.createElement('div');
+    el.className = 'card';
+    const appDate = ymd(now());
+    const appMonth = ym(now());
+    const appWeek = weekKey(now());
+    el.innerHTML = `
+      <div class="row">
+        <div>
+          <p class="h" style="margin:0;">测试工具（模拟切周期）</p>
+          <p class="sub" style="margin:4px 0 0 0;">用于验证：日结转 / 周结转 / 月底生成图表</p>
+        </div>
+        <span class="pill">常显</span>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+        <button class="btn small" id="simDay">模拟新一天</button>
+        <button class="btn small" id="simWeek">模拟新一周</button>
+        <button class="btn small danger" id="simMonth">模拟新月份</button>
+      </div>
+      <div class="hint">当前App日期：<span class="mono">${appDate}</span>｜本月：<span class="mono">${appMonth}</span>｜本周：<span class="mono">${appWeek}</span>（${timeSourceLabel()}）</div>
+    `;
+    setTimeout(()=>{
+      $('#simDay').onclick = () => {
+        // 真正把“App 时间”往后滚 1 天（用于测试日结转/周切换/月切换）
+        bumpSimByMs(24 * 60 * 60 * 1000);
+        toast(`已滚动到 ${ymd(now())}`);
+        render();
+      };
+      $('#simWeek').onclick = () => {
+        // 真正把“App 时间”往后滚 7 天（用于测试周结余累计）
+        bumpSimByMs(7 * 24 * 60 * 60 * 1000);
+        toast(`已滚动到 ${ymd(now())}（本月 ${ym(now())}）`);
+        render();
+      };
+      $('#simMonth').onclick = () => {
+        // 真正把“App 时间”往后滚 1 个月（同日优先；没有同日则落到月底）
+        const before = now();
+        const after = addMonthsPreserveDay(before, 1);
+        bumpSimByMs(after.getTime() - before.getTime());
+        toast(`已滚动到 ${ymd(now())}（本月 ${ym(now())}）`);
+        render();
+      };
+    },0);
+    return el;
+  }
+
+  function renderVoice(){
+    const el = document.createElement('div');
+    const timeStr = (() => {
+      try{ return now().toLocaleString(); }catch(e){ return String(now()); }
+    })();
+    const deviceTimeStr = (() => {
+      try{ return new Date().toLocaleString(); }catch(e){ return String(new Date()); }
+    })();
+    el.innerHTML = `
+      <div class="card">
+        <div class="row">
+          <div>
+            <p class="h">语音（这里用文本模拟）</p>
+            <p class="sub">你输入一句话，我先“解析→显示我理解的动作→你点确认才执行”。</p>
+            <p class="sub">AI解析：${state.ai.apiKey ? (state.ai.lastTestOk ? '已启用（用 OpenRouter）' : '已填 Key（建议先点一次“测试密钥”）') : '未启用（去设置里填 Key 并测试）'}</p>
+            <p class="sub">App时间：<span class="mono">${timeStr}</span>（${timeSourceLabel()}）</p>
+            <p class="sub">设备时间：<span class="mono">${deviceTimeStr}</span></p>
+          </div>
+          <button class="btn small" id="pickExample">来句示例</button>
+        </div>
+        <div class="field">
+          <div class="label">一句话指令</div>
+          <textarea class="textarea" id="cmd" placeholder="例如：今天午餐花了 28\n把本月水果预算改成 150\n新增类别：交通（按月）预算 300"></textarea>
+          <div class="hint">你刚说“午饭晚饭都可以抄的”：这里默认只扣“吃饭总余额”，不限制单餐上限。</div>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn" id="parse">解析</button>
+          <button class="btn primary" id="parseAndConfirm">解析并执行（需确认）</button>
+        </div>
+        <div class="hr"></div>
+        <div id="voiceResult" class="sub">还没解析。</div>
+      </div>
+    `;
+    screen.innerHTML = '';
+    screen.appendChild(el);
+
+    const examples = [
+      '今天早餐花了 12',
+      '今天午餐花了 28',
+      '今天晚餐花了 35',
+      '本月水果花了 16',
+      '把本月水果预算改成 150',
+      '把午餐预算改成 40',
+      '新增类别：交通（按月）预算 300'
+    ];
+
+    $('#pickExample').onclick = () => {
+      $('#cmd').value = examples[Math.floor(Math.random()*examples.length)];
+    };
+    $('#parse').onclick = async () => {
+      const text = ($('#cmd').value || '').trim();
+      $('#voiceResult').textContent = '解析中…';
+      const parsed = await parseVoiceAuto(text);
+      $('#voiceResult').innerHTML = parsed ? pretty(parsed) : `<span style="color:${getComputedStyle(document.documentElement).getPropertyValue('--danger')}">解析失败</span>：没有返回结果。`;
+    };
+    $('#parseAndConfirm').onclick = async () => {
+      const text = ($('#cmd').value || '').trim();
+      $('#voiceResult').textContent = '解析中…';
+      const parsed = await parseVoiceAuto(text);
+      if(!parsed){
+        $('#voiceResult').innerHTML = `<span style="color:${getComputedStyle(document.documentElement).getPropertyValue('--danger')}">解析失败</span>：没有返回结果。`;
+        return;
+      }
+      if(parsed.type === 'error'){
+        $('#voiceResult').innerHTML = pretty(parsed);
+        return;
+      }
+      confirmAction(parsed);
+    };
+  }
+
+  function renderSettings(){
+    const el = document.createElement('div');
+    const f = state.budgets.food_daily;
+    const w = state.budgets.week || {};
+    const m = state.budgets.month;
+    const extras = state.budgets.categoriesExtra || [];
+    const mr = state.meta.mealRanges || { supperEnd:'05:00', breakfastEnd:'10:30', lunchEnd:'15:00', dinnerEnd:'21:00' };
+    const deviceTimeStr = (() => { try{ return new Date().toLocaleString(); }catch(e){ return String(new Date()); } })();
+    const appTimeStr = (() => { try{ return now().toLocaleString(); }catch(e){ return String(now()); } })();
+    const offsetMin = Math.round((TIME_OFFSET_MS||0) / 60000);
+    const wkFactor = 52/12; // 约 4.33 周/月
+    const fruitPerWeek = Math.round(Number(m.fruit||0) / wkFactor);
+    const snackPerWeek = Math.round(Number(m.snack||0) / wkFactor);
+    const wdDayTotal = Number(f.weekday?.lunch||0) + Number(f.weekday?.dinner||0) + Number(f.weekday?.supper||0);
+    const weDayTotal = Number(f.weekend?.lunch||0) + Number(f.weekend?.dinner||0) + Number(f.weekend?.supper||0);
+    el.innerHTML = `
+      <div class="card">
+        <div class="row">
+          <div>
+            <p class="h">预算设置（你自己配）</p>
+            <p class="sub">你改完保存后就一直这样，除非你下次再改；也可以用“语音指令”改。</p>
+          </div>
+          <span class="pill">月总预算自动汇总</span>
+        </div>
+
+        <div class="field">
+          <div class="label">语音解析 AI（OpenRouter）</div>
+          <div class="sub">已保存 Key：${state.ai.apiKey ? '是（' + maskKey(state.ai.apiKey) + '）' : '否'}</div>
+          <div class="field">
+            <input class="input" id="orKey" type="password" value="${state.ai.apiKey || ''}" placeholder="在这里粘贴 OpenRouter API Key（会自动记住）" />
+            <div class="hint">已保存的 Key 会自动回填（不需要你每次刷新重输）；想换 Key 就直接覆盖，然后点“测试密钥”。</div>
+          </div>
+          <div class="field">
+            <input class="input" id="orModel" value="${state.ai.model || 'openai/gpt-4o-mini'}" placeholder="模型名" />
+            <div class="hint">模型我先默认填好；你后面要换也可以改。</div>
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <button class="btn small" id="testAiKey">测试密钥</button>
+            <span class="sub" id="aiKeyStatus">${state.ai.lastTestOk ? '上次测试：成功' : '上次测试：未通过/未测试'}</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="label">时间校准（不改系统也能用）</div>
+          <div class="sub">来源：${timeSourceLabel()}（偏移 ${offsetMin} 分钟）· 设备：<span class="mono">${deviceTimeStr}</span> · App：<span class="mono">${appTimeStr}</span></div>
+          <div class="row" style="margin-top:10px;">
+            <button class="btn small" id="syncTime">从网络校准一次</button>
+            <button class="btn small" id="clearTime">恢复系统时间</button>
+            <span class="sub" id="timeStatus">—</span>
+          </div>
+          <div class="hint">当你手机系统时间是 2023 这种情况，“昨天/今天”会错；点一次校准即可，不用去系统设置。</div>
+        </div>
+
+        <div class="field">
+          <div class="row" style="justify-content:space-between; align-items:baseline;">
+            <div class="label">吃饭（日预算：工作日 周一-周五）</div>
+            <div class="smeta">一天预算：<span class="mono">¥ <span id="wdTotal">${money(wdDayTotal)}</span></span></div>
+          </div>
+          <div class="foodline">
+            <input class="sinput" id="wdLunch" value="${f.weekday?.lunch ?? 0}" inputmode="decimal" placeholder="午餐" />
+            <input class="sinput" id="wdDinner" value="${f.weekday?.dinner ?? 0}" inputmode="decimal" placeholder="晚餐" />
+            <input class="sinput" id="wdSupper" value="${f.weekday?.supper ?? 0}" inputmode="decimal" placeholder="夜宵" />
+            <div class="foodsum">合计 ¥ <span id="wdTotal2">${money(wdDayTotal)}</span> /天</div>
+          </div>
+          <div class="hint">你只改这三个数；合计会自动算出来。</div>
+        </div>
+
+        <div class="field">
+          <div class="row" style="justify-content:space-between; align-items:baseline;">
+            <div class="label">吃饭（日预算：周末 周六-周日）</div>
+            <div class="smeta">一天预算：<span class="mono">¥ <span id="weTotal">${money(weDayTotal)}</span></span></div>
+          </div>
+          <div class="foodline">
+            <input class="sinput" id="weLunch" value="${f.weekend?.lunch ?? 0}" inputmode="decimal" placeholder="午餐" />
+            <input class="sinput" id="weDinner" value="${f.weekend?.dinner ?? 0}" inputmode="decimal" placeholder="晚餐" />
+            <input class="sinput" id="weSupper" value="${f.weekend?.supper ?? 0}" inputmode="decimal" placeholder="夜宵" />
+            <div class="foodsum">合计 ¥ <span id="weTotal2">${money(weDayTotal)}</span> /天</div>
+          </div>
+          <div class="hint">周末同理：你只改三个数，合计自动算。</div>
+        </div>
+
+        <div class="field">
+          <div class="label">吃饭餐别时间段（自动判断）</div>
+          <div class="sub">你只输入“吃饭金额”，系统按时间自动归类到早餐/午餐/晚餐/夜宵。</div>
+          <div class="srows">
+            <div class="srow"><span class="slabel">夜宵结束（次日）</span><input class="sinput" id="supperEnd" value="${mr.supperEnd}" inputmode="numeric" /></div>
+            <div class="srow"><span class="slabel">早餐结束</span><input class="sinput" id="breakfastEnd" value="${mr.breakfastEnd}" inputmode="numeric" /></div>
+            <div class="srow"><span class="slabel">午餐结束（3点）</span><input class="sinput" id="lunchEnd" value="${mr.lunchEnd}" inputmode="numeric" /></div>
+            <div class="srow"><span class="slabel">晚餐结束（9点）</span><input class="sinput" id="dinnerEnd" value="${mr.dinnerEnd}" inputmode="numeric" /></div>
+          </div>
+          <div class="hint">现在规则：${mr.supperEnd}–${mr.breakfastEnd} 早餐；${mr.breakfastEnd}–${mr.lunchEnd} 午餐；${mr.lunchEnd}–${mr.dinnerEnd} 晚餐；${mr.dinnerEnd}–次日${mr.supperEnd} 夜宵。</div>
+        </div>
+
+        <div class="field">
+          <div class="label">月预算（水果/零食）</div>
+          <div class="srows">
+            <div class="srow">
+              <div class="row" style="gap:8px;">
+                <span class="slabel">水果（本月预算）</span>
+                <span class="smeta">≈ ¥ ${money(fruitPerWeek)} /周</span>
+              </div>
+              <input class="sinput" id="fruit" value="${m.fruit ?? 0}" inputmode="decimal" />
+            </div>
+            <div class="srow">
+              <div class="row" style="gap:8px;">
+                <span class="slabel">零食（本月预算）</span>
+                <span class="smeta">≈ ¥ ${money(snackPerWeek)} /周</span>
+              </div>
+              <input class="sinput" id="snack" value="${m.snack ?? 0}" inputmode="decimal" />
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="label">月预算（游玩/药品/网费/日用）</div>
+          <div class="srows">
+            <div class="srow"><span class="slabel">游玩（本月预算）</span><input class="sinput" id="fun" value="${m.fun ?? 0}" inputmode="decimal" /></div>
+            <div class="srow"><span class="slabel">药品（本月预算）</span><input class="sinput" id="med" value="${m.med ?? 0}" inputmode="decimal" /></div>
+            <div class="srow"><span class="slabel">网费（本月预算）</span><input class="sinput" id="net" value="${m.net ?? 0}" inputmode="decimal" /></div>
+            <div class="srow"><span class="slabel">日用（本月预算）</span><input class="sinput" id="daily" value="${m.daily ?? 0}" inputmode="decimal" /></div>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="label">自定义类别（可新增）</div>
+          <div class="sub">当前：${extras.length} 个</div>
+          <button class="btn small" id="addCat" style="margin-top:10px;">新增类别</button>
+          <div id="extraList" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
+            ${
+              extras.length
+                ? extras.map(x => `
+                  <div class="card" data-extra-row="${x.id}" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+                    <div class="row">
+                      <input class="input" data-extra-name value="${x.name}" style="flex:1;" />
+                      <button class="btn small danger" data-extra-del="1">删除</button>
+                    </div>
+                    <div class="grid2" style="margin-top:10px;">
+                      <select class="select" data-extra-cycle>
+                        <option value="day" ${x.cycle==='day'?'selected':''}>按日</option>
+                        <option value="week" ${x.cycle==='week'?'selected':''}>按周</option>
+                        <option value="month" ${x.cycle==='month'?'selected':''}>按月</option>
+                      </select>
+                      <input class="input" data-extra-amount type="number" value="${Number(x.amount||0)}" />
+                    </div>
+                    <div class="hint">改完点页面底部“保存”。</div>
+                  </div>
+                `).join('')
+                : `<div class="sub">暂无自定义类别</div>`
+            }
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="label">月总预算（自动=分类预算汇总，示意按30天/4周估算）</div>
+          <div class="kpi">
+            <div class="big mono">¥ ${money(monthTotalsEstimate())}</div>
+            <div class="small">用于展示进度条；真实 App 会按真实天数周数精算</div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          <button class="btn" id="saveSet">保存</button>
+          <button class="btn primary" id="goLedger">回账本</button>
+        </div>
+      </div>
+    `;
+    screen.innerHTML = '';
+    screen.appendChild(el);
+
+    $('#testAiKey').onclick = async () => {
+      const inputKey = ($('#orKey').value || '').trim();
+      const apiKey = inputKey || (state.ai.apiKey || '');
+      const model = ($('#orModel').value || '').trim() || 'openai/gpt-4o-mini';
+      const status = $('#aiKeyStatus');
+      if(!apiKey){
+        status.textContent = '请先粘贴 Key';
+        return;
+      }
+      status.textContent = '测试中…';
+      try{
+        const r = await testOpenRouter(apiKey, model);
+        if(r.ok){
+          state.ai.lastTestOk = true;
+          state.ai.lastTestAt = new Date().toISOString();
+          // 如果用户在输入框里粘贴了新 Key，则在测试成功后自动保存
+          if(inputKey && inputKey !== state.ai.apiKey){
+            state.ai.apiKey = inputKey;
+          }
+          state.ai.model = model;
+          save();
+          status.textContent = '测试成功';
+          toast('密钥可用');
+        } else {
+          state.ai.lastTestOk = false;
+          state.ai.lastTestAt = new Date().toISOString();
+          save();
+          status.textContent = '测试失败：' + (r.error || '未知错误');
+        }
+      }catch(e){
+        state.ai.lastTestOk = false;
+        state.ai.lastTestAt = new Date().toISOString();
+        save();
+        status.textContent = '测试失败：网络/CORS';
+      }
+    };
+
+    $('#syncTime').onclick = async () => {
+      const st = $('#timeStatus');
+      st.textContent = '校准中…';
+      const r = await syncTimeFromNet();
+      if(r.ok){
+        st.textContent = '校准成功';
+        toast('时间已校准');
+        render();
+      }else{
+        st.textContent = r.error || '校准失败';
+      }
+    };
+    $('#clearTime').onclick = () => {
+      clearTimeOffset();
+      toast('已恢复系统时间');
+      render();
+    };
+
+    $('#addCat').onclick = () => openAddCategoryModal();
+
+    // 自定义类别：删除（即时生效，仍会在保存后统一保存到本地）
+    const extraList = $('#extraList');
+    if(extraList){
+      extraList.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-extra-del]');
+        if(!btn) return;
+        const row = e.target.closest('[data-extra-row]');
+        if(!row) return;
+        row.remove();
+        toast('已移除一条（点保存后生效）');
+      });
+    }
+
+    $('#saveSet').onclick = () => {
+      const inputKey = ($('#orKey').value || '').trim();
+      const model = ($('#orModel').value || '').trim() || 'openai/gpt-4o-mini';
+      if(inputKey && inputKey !== state.ai.apiKey){
+        state.ai.apiKey = inputKey;
+        state.ai.lastTestOk = false; // 让用户再点一次测试
+        state.ai.lastTestAt = null;
+      }
+      state.ai.model = model;
+
+      // 保存吃饭餐别时间段
+      state.meta.mealRanges = {
+        supperEnd: ($('#supperEnd').value || '05:00').trim(),
+        breakfastEnd: ($('#breakfastEnd').value || '10:30').trim(),
+        lunchEnd: ($('#lunchEnd').value || '15:00').trim(),
+        dinnerEnd: ($('#dinnerEnd').value || '21:00').trim()
+      };
+
+      state.budgets.food_daily.weekday = {
+        lunch: Number($('#wdLunch').value||0),
+        dinner: Number($('#wdDinner').value||0),
+        supper: Number($('#wdSupper').value||0)
+      };
+      state.budgets.food_daily.weekend = {
+        lunch: Number($('#weLunch').value||0),
+        dinner: Number($('#weDinner').value||0),
+        supper: Number($('#weSupper').value||0)
+      };
+      state.budgets.month.snack = Number($('#snack').value||0);
+      state.budgets.month.fruit = Number($('#fruit').value||0);
+      state.budgets.month.med = Number($('#med').value||0);
+      state.budgets.month.fun = Number($('#fun').value||0);
+      state.budgets.month.net = Number($('#net').value||0);
+      state.budgets.month.daily = Number($('#daily').value||0);
+
+      // 保存自定义类别预算
+      const rows = $$('#extraList [data-extra-row]');
+      state.budgets.categoriesExtra = rows.map(r => ({
+        id: r.getAttribute('data-extra-row'),
+        name: (r.querySelector('[data-extra-name]')?.value || '').trim() || '未命名',
+        cycle: r.querySelector('[data-extra-cycle]')?.value || 'month',
+        amount: Number(r.querySelector('[data-extra-amount]')?.value || 0)
+      })).filter(x => x.amount > 0);
+
+      // 预算保存后：用新的预算重算“当前可用”（不回滚历史交易，仅影响今天预算口径）
+      recalcFoodForToday();
+      save();
+      toast('已保存预算设置');
+      render();
+    };
+    $('#goLedger').onclick = () => { currentTab='ledger'; render(); };
+
+    // 吃饭合计：输入时实时更新（不需要你自己算）
+    function updateFoodSums(){
+      const wdl = Number($('#wdLunch')?.value || 0);
+      const wdd = Number($('#wdDinner')?.value || 0);
+      const wds = Number($('#wdSupper')?.value || 0);
+      const wel = Number($('#weLunch')?.value || 0);
+      const wed = Number($('#weDinner')?.value || 0);
+      const wes = Number($('#weSupper')?.value || 0);
+      const wd = (isFinite(wdl)?wdl:0) + (isFinite(wdd)?wdd:0) + (isFinite(wds)?wds:0);
+      const we = (isFinite(wel)?wel:0) + (isFinite(wed)?wed:0) + (isFinite(wes)?wes:0);
+      const a = $('#wdTotal'), b = $('#wdTotal2'), c = $('#weTotal'), d = $('#weTotal2');
+      if(a) a.textContent = money(wd);
+      if(b) b.textContent = money(wd);
+      if(c) c.textContent = money(we);
+      if(d) d.textContent = money(we);
+    }
+    ['wdLunch','wdDinner','wdSupper','weLunch','weDinner','weSupper'].forEach(id=>{
+      const inp = $('#'+id);
+      if(inp) inp.addEventListener('input', updateFoodSums);
+    });
+    updateFoodSums();
+  }
+
+  function renderHistory(){
+    const el = document.createElement('div');
+    const monthKey = state.cycles.month.key;
+    const weekK = state.cycles.week.key;
+    const list = state.txns.slice(0, 60);
+    const settlements = state.cycles.pool.settlements.slice(0, 8);
+    const hasStats = state.monthlyStats && state.monthlyStats.length > 0;
+
+    el.innerHTML = `
+      <div class="card">
+        <div class="row">
+          <div>
+            <p class="h">历史记录</p>
+            <p class="sub">每一笔都会保留，不会因为结转而删除。</p>
+          </div>
+          <span class="pill">本月：${monthKey}</span>
+        </div>
+        
+        <div class="hr"></div>
+        <div class="label">月度花销与结余趋势</div>
+        <div style="margin-top:10px; padding:10px; border-radius:12px; background: var(--surface-2); position:relative; height:200px;">
+          ${hasStats ? '<canvas id="monthlyChart"></canvas>' : '<div class="sub" style="text-align:center; margin-top:80px;">暂无历史月度数据，跨月后将在此生成图表。</div>'}
+        </div>
+
+        <div class="hr"></div>
+        <div class="label">最近交易（最多显示60条）</div>
+        <div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
+          ${list.length ? list.map(t => `
+            <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+              <div class="row">
+                <div style="display:flex; flex-direction:column;">
+                  <div class="mono" style="font-weight:900">${t.kind==='expense'?'支出':'收入'} · ${categoryName(t.category, t.meal)}</div>
+                  <div class="sub">${t.date} · ${t.note || '—'}</div>
+                </div>
+                <div class="mono" style="font-weight:900; color:${t.kind==='expense'?'#dc2626':'#16a34a'}">
+                  ${t.kind==='expense'?'-':'+'}¥ ${money(t.amount)}
+                </div>
+              </div>
+            </div>
+          `).join('') : `<div class="sub">还没有任何记录。</div>`}
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          <button class="btn" id="addTxn2">记一笔</button>
+          <button class="btn" id="exportExcel">导出 Excel</button>
+          <button class="btn primary" id="goLedger2">回账本</button>
+        </div>
+      </div>
+    `;
+    screen.innerHTML = '';
+    screen.appendChild(el);
+    $('#addTxn2').onclick = () => openTxnModal({});
+    $('#exportExcel').onclick = exportToExcel;
+    $('#goLedger2').onclick = () => { currentTab='ledger'; render(); };
+
+    if(hasStats){
+      setTimeout(() => {
+        const ctx = document.getElementById('monthlyChart').getContext('2d');
+        const labels = state.monthlyStats.map(s => s.monthKey.slice(2)); // e.g. "26-08"
+        const spentData = state.monthlyStats.map(s => s.spent);
+        const savedData = state.monthlyStats.map(s => s.saved);
+
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: '总花销',
+                data: spentData,
+                borderColor: '#dc2626',
+                backgroundColor: 'rgba(220,38,38,0.1)',
+                tension: 0.4,
+                fill: true
+              },
+              {
+                label: '节省(结余)',
+                data: savedData,
+                borderColor: '#16a34a',
+                backgroundColor: 'rgba(22,163,74,0.1)',
+                tension: 0.4,
+                fill: true
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: '#64748b' } }
+            },
+            scales: {
+              x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(226,232,240,0.1)' } },
+              y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(226,232,240,0.1)' } }
+            }
+          }
+        });
+      }, 50);
+    }
+  }
+
+  // --- Add transaction
+  function exportToExcel() {
+    const wb = XLSX.utils.book_new();
+
+    // 1. 导出明细数据
+    const txnsData = state.txns.map(t => ({
+      '日期': t.date,
+      '类型': t.kind === 'expense' ? '支出' : '收入',
+      '类别': categoryName(t.category, t.meal),
+      '金额': t.amount,
+      '备注': t.note || ''
+    }));
+    const wsTxns = XLSX.utils.json_to_sheet(txnsData);
+    XLSX.utils.book_append_sheet(wb, wsTxns, "账单明细");
+
+    // 2. 导出月度统计数据
+    if (state.monthlyStats && state.monthlyStats.length > 0) {
+      const statsData = state.monthlyStats.map(s => ({
+        '月份': s.monthKey,
+        '月总预算': s.budget,
+        '总花销': s.spent,
+        '节省结余': s.saved
+      }));
+      const wsStats = XLSX.utils.json_to_sheet(statsData);
+      XLSX.utils.book_append_sheet(wb, wsStats, "月度报表");
+    }
+
+    // 下载文件
+    XLSX.writeFile(wb, "预算账本数据.xlsx");
+    toast('已开始下载 Excel');
+  }
+
+  function openTxnModal(preset){
+    ensureToday(); ensureWeek(); ensureMonth();
+    const cats = categoryList();
+    const body = document.createElement('div');
+    body.innerHTML = `
+      <div class="field">
+        <div class="label">类型</div>
+        <select class="select" id="kind">
+          <option value="expense">支出</option>
+          <option value="income">收入</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="label">类别</div>
+        <select class="select" id="cat"></select>
+      </div>
+      <div class="field" id="mealWrap" style="display:none;">
+        <div class="label">餐别（只用于显示，扣减按“吃饭总余额”）</div>
+        <select class="select" id="meal">
+          <option value="breakfast">早餐</option>
+          <option value="lunch">午餐</option>
+          <option value="dinner">晚餐</option>
+          <option value="supper">夜宵</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="label">金额</div>
+        <input class="input" id="amount" type="number" placeholder="例如 28" />
+      </div>
+      <div class="field">
+        <div class="label">日期</div>
+        <input class="input" id="date" type="date" value="${ymd(now())}" />
+      </div>
+      <div class="field">
+        <div class="label">备注（可空）</div>
+        <input class="input" id="note" placeholder="例如：外卖/超市/医院" />
+      </div>
+      <div class="hint">支出会自动扣减对应类别的剩余。</div>
+    `;
+
+    const catSel = $('#cat', body);
+    catSel.innerHTML = cats.map(c => `<option value="${c.id}">${c.name}${c.cycle==='day'?'（日）':c.cycle==='week'?'（周）':'（月）'}</option>`).join('');
+
+    // preset
+    $('#kind', body).value = preset.kind || 'expense';
+    $('#cat', body).value = preset.category || 'food';
+    $('#meal', body).value = preset.meal || guessMealByTime(now());
+    $('#amount', body).value = preset.amount || '';
+
+    function updateMeal(){
+      const cat = $('#cat', body).value;
+      $('#mealWrap', body).style.display = (cat === 'food') ? 'block' : 'none';
+    }
+    updateMeal();
+    $('#cat', body).addEventListener('change', updateMeal);
+
+    const cancel = mkBtn('取消', 'btn', ()=> closeModal());
+    const ok = mkBtn('保存', 'btn primary', ()=> {
+      const kind = $('#kind', body).value;
+      const category = $('#cat', body).value;
+      const meal = $('#meal', body).value;
+      const amount = Number($('#amount', body).value || 0);
+      const date = $('#date', body).value || ymd(now());
+      const note = $('#note', body).value || '';
+      if(!amount || amount <= 0){
+        toast('金额要大于 0');
+        return;
+      }
+      addTxn({ kind, category, meal: category==='food' ? meal : null, amount, date, note });
+      closeModal();
+      toast('已保存一笔');
+      render();
+    });
+    openModal('记一笔', body, [cancel, ok]);
+  }
+
+  function addTxn(t){
+    ensureToday(); ensureWeek(); ensureMonth();
+    const d = new Date((t.date || ymd(now())) + 'T00:00:00');
+    const monthKey = ym(d);
+    const wk = weekKey(d);
+    const tx = {
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2),
+      createdAt: new Date().toISOString(),
+      kind: t.kind,
+      category: t.category,
+      meal: t.meal,
+      amount: Number(t.amount||0),
+      date: t.date || ymd(now()),
+      monthKey,
+      weekKey: wk,
+      note: t.note || ''
+    };
+    state.txns.unshift(tx);
+
+    // apply to current-cycle counters only if txn is within current cycle keys (prototype simplification)
+    if(tx.kind === 'expense'){
+      if(tx.category === 'food' && tx.date === state.cycles.month.food.todayKey){
+        state.cycles.month.food.todaySpent += tx.amount;
+        state.cycles.month.food.monthBalance -= tx.amount;
+        if(!isFinite(state.cycles.month.food.monthBalance)) state.cycles.month.food.monthBalance = 0;
+      }
+      if(tx.weekKey === state.cycles.week.key){
+        // 周期为“周”的类别都在这里累计 spent（含自定义周类别）
+        const cat = categoryList().find(c => c.id === tx.category);
+        if(cat && cat.cycle === 'week'){
+          if(!state.cycles.week[tx.category]) state.cycles.week[tx.category] = { spent: 0 };
+          state.cycles.week[tx.category].spent += tx.amount;
+        }
+      }
+      
+      // 动态更新历史折线图
+      updateMonthlyStatsForTxn(tx);
+      
+      recalcOverdraftForTxn(tx);
+    }
+    save();
+  }
+
+  // --- Voice parsing (text-based)
+  function parseDateHintFromText(tt){
+    const t = (tt || '').trim();
+    if(!t) return null;
+
+    // 1) 显式日期：2026-08-28 / 2026/08/28
+    let m = t.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if(m){
+      const y = Number(m[1]), mo = Number(m[2]), da = Number(m[3]);
+      const d = new Date(y, mo - 1, da);
+      if(isFinite(d.getTime())) return ymd(d);
+    }
+
+    // 2) 今天/昨天/前天
+    const base = now();
+    const d = new Date(base);
+    if(/前天/.test(t)){ d.setDate(d.getDate() - 2); return ymd(d); }
+    if(/昨天/.test(t)){ d.setDate(d.getDate() - 1); return ymd(d); }
+    if(/今天/.test(t)){ return ymd(d); }
+
+    // 3) 周几（默认指“本周最近的那个周几”，更符合口语）
+    // 例：周一 / 星期一 / 上周周一 / 下周周一 / 这周周一 / 本周周一
+    m = t.match(/(上周|下周|这周|本周)?(周|星期)(一|二|三|四|五|六|日|天)/);
+    if(m){
+      const prefix = m[1] || '';
+      const wd = m[3];
+      const map = { '一':0,'二':1,'三':2,'四':3,'五':4,'六':5,'日':6,'天':6 };
+      const offset = map[wd];
+      if(typeof offset !== 'number') return null;
+      const mon = startOfWeekMonday(now()); // 以“App时间”为基准
+      const target = new Date(mon);
+      target.setDate(target.getDate() + offset);
+      if(prefix === '上周') target.setDate(target.getDate() - 7);
+      if(prefix === '下周') target.setDate(target.getDate() + 7);
+      // 没写“下周”但算出来是未来日期：按口语理解，多半指上一个同名周几
+      if(!prefix && target.getTime() > now().getTime()){
+        target.setDate(target.getDate() - 7);
+      }
+      return ymd(target);
+    }
+
+    return null;
+  }
+
+  function parseVoice(text){
+    const t = (text||'').trim();
+    if(!t) return null;
+
+    function dateFromText(tt){
+      return parseDateHintFromText(tt) || ymd(now());
+    }
+
+    function mealFromText(tt){
+      if(/早餐/.test(tt)) return 'breakfast';
+      if(/午餐|午饭|中午/.test(tt)) return 'lunch';
+      if(/晚餐|晚饭|晚上/.test(tt)) return 'dinner';
+      if(/夜宵|宵夜|凌晨/.test(tt)) return 'supper';
+      return guessMealByTime(now());
+    }
+
+    // spending patterns
+    // 今天早餐/午餐/晚餐/夜宵花了 28
+    let m = t.match(/今天(早餐|午餐|晚餐|夜宵).{0,3}花了?\s*(\d+(\.\d+)?)/);
+    if(m){
+      const meal = m[1] === '早餐' ? 'breakfast' : m[1] === '午餐' ? 'lunch' : m[1] === '晚餐' ? 'dinner' : 'supper';
+      return { type:'add_txn', kind:'expense', category:'food', meal, amount: Number(m[2]), date: ymd(now()) };
+    }
+    // 我昨天吃饭花了 50 / 昨天花了50块饭钱 / 昨天吃饭的钱50
+    m = t.match(/(前天|昨天|今天)?[^\\d]{0,12}(吃饭|饭钱|饭费)[^\\d]{0,12}(花了?)?\\s*(\\d+(\\.\\d+)?)/);
+    if(m){
+      return { type:'add_txn', kind:'expense', category:'food', meal: mealFromText(t), amount: Number(m[4]), date: dateFromText(t) };
+    }
+    // 兜底：只要包含“吃饭/饭钱”且有金额，就当成一笔吃饭支出（今天）
+    m = t.match(/(吃饭|饭钱|饭费)[^\\d]{0,12}(\\d+(\\.\\d+)?)/);
+    if(m){
+      return { type:'add_txn', kind:'expense', category:'food', meal: mealFromText(t), amount: Number(m[2]), date: dateFromText(t) };
+    }
+    // 本月/本周 水果花了 16 / 零食花了 12（目前水果/零食按月口径；保留“本周”说法兼容）
+    m = t.match(/本(月|周)(水果|零食).{0,3}花了?\s*(\d+(\.\d+)?)/);
+    if(m){
+      const cat = m[2] === '水果' ? 'fruit' : 'snack';
+      return { type:'add_txn', kind:'expense', category: cat, amount: Number(m[3]), date: ymd(now()) };
+    }
+    // 本月药品/游玩/网费花了
+    m = t.match(/本月(药品|游玩|网费|话费|流量).{0,3}花了?\s*(\d+(\.\d+)?)/);
+    if(m){
+      const map = { '药品':'med', '游玩':'fun', '网费':'net', '话费':'net', '流量':'net' };
+      return { type:'add_txn', kind:'expense', category: map[m[1]], amount: Number(m[2]), date: ymd(now()) };
+    }
+
+    // change budgets
+    // 把本月/本周 水果/零食预算改成 150（目前按月口径；保留“本周”说法兼容）
+    m = t.match(/把本(月|周)(水果|零食)预算改成\s*(\d+(\.\d+)?)/);
+    if(m){
+      const cat = m[2] === '水果' ? 'fruit' : 'snack';
+      return { type:'set_budget', target:`month.${cat}`, value: Number(m[3]) };
+    }
+    // 把午餐预算改成 40 / 晚餐 / 夜宵
+    m = t.match(/把(午餐|晚餐|夜宵)预算改成\s*(\d+(\.\d+)?)/);
+    if(m){
+      const k = m[1] === '午餐' ? 'lunch' : m[1] === '晚餐' ? 'dinner' : 'supper';
+      return { type:'set_budget', target:`food_daily.${k}`, value: Number(m[2]) };
+    }
+    // 新增类别：交通（按月）预算 300
+    m = t.match(/新增类别[:：]?\s*([^\s（(]+)\s*[（(]按(日|周|月)[)）]\s*预算\s*(\d+(\.\d+)?)/);
+    if(m){
+      const cycle = m[2] === '日' ? 'day' : m[2] === '周' ? 'week' : 'month';
+      return { type:'add_category', name: m[1], cycle, amount: Number(m[3]) };
+    }
+    // 收入：今天收入 500
+    m = t.match(/(今天)?收入\s*(\d+(\.\d+)?)/);
+    if(m){
+      return { type:'add_txn', kind:'income', category:'income', amount: Number(m[2]), date: ymd(now()) };
+    }
+
+    return null;
+  }
+
+  function parseVoiceManyLocal(text){
+    // 支持“一次输入多条”：按换行/句号/分号切分；也兼容“然后”
+    const raw = String(text || '').trim();
+    if(!raw) return null;
+    const parts = raw
+      .split(/\n|；|;|。/g)
+      .flatMap(x => String(x).split(/然后/g))
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const actions = [];
+    for(const p of parts){
+      const one = parseVoice(p);
+      if(one) actions.push(one);
+    }
+    if(!actions.length) return null;
+    if(actions.length === 1) return actions[0];
+    return { type:'batch', actions };
+  }
+
+  function normalizeActions(result){
+    if(!result) return null;
+    if(Array.isArray(result)){
+      return { type:'batch', actions: result };
+    }
+    if(result?.type === 'batch' && Array.isArray(result.actions)){
+      return result;
+    }
+    return result;
+  }
+
+  function normalizeMeal(meal){
+    const m = String(meal || '').trim();
+    if(!m) return null;
+    if(['breakfast','lunch','dinner','supper'].includes(m)) return m;
+    if(/早餐/.test(m)) return 'breakfast';
+    if(/午餐|午饭|中午/.test(m)) return 'lunch';
+    if(/晚餐|晚饭|晚上/.test(m)) return 'dinner';
+    if(/夜宵|宵夜|凌晨/.test(m)) return 'supper';
+    return null;
+  }
+
+  function normalizeCategory(raw){
+    const s = String(raw || '').trim();
+    if(!s) return null;
+    const ids = ['food','fruit','snack','fun','med','net','daily','income'];
+    if(ids.includes(s)) return s;
+    const map = [
+      ['food', /吃饭|饭钱|饭费|餐费/],
+      ['fruit', /水果/],
+      ['snack', /零食/],
+      ['med', /药品|买药/],
+      ['fun', /游玩|娱乐/],
+      ['net', /网费|话费|流量/],
+      ['daily', /日用|日用品/],
+      ['income', /收入|工资|转账到账/]
+    ];
+    for(const [id, re] of map){
+      if(re.test(s)) return id;
+    }
+    const extras = state.budgets?.categoriesExtra || [];
+    const hit = extras.find(x => x?.name && (s === x.name || s.includes(x.name) || x.name.includes(s)));
+    if(hit) return hit.id;
+    return null;
+  }
+
+  function normalizeBudgetTarget(raw){
+    const s = String(raw || '').trim();
+    if(!s) return null;
+    if(/^((month|week)\.(fruit|snack|fun|med|net|daily)|food_daily\.(lunch|dinner|supper))$/.test(s)) return s;
+    if(/水果/.test(s)) return 'month.fruit';
+    if(/零食/.test(s)) return 'month.snack';
+    if(/药品/.test(s)) return 'month.med';
+    if(/游玩/.test(s)) return 'month.fun';
+    if(/网费|话费|流量/.test(s)) return 'month.net';
+    if(/日用|日用品/.test(s)) return 'month.daily';
+    if(/午餐|午饭|中午/.test(s)) return 'food_daily.lunch';
+    if(/晚餐|晚饭|晚上/.test(s)) return 'food_daily.dinner';
+    if(/夜宵|宵夜|凌晨/.test(s)) return 'food_daily.supper';
+    return null;
+  }
+
+  function normalizeDate(dateStr, sourceText){
+    const hinted = parseDateHintFromText(sourceText || '');
+    if(hinted) return hinted;
+    const d = String(dateStr || '').trim();
+    if(!d) return ymd(now());
+    const yy = Number((d.match(/^(\d{4})/)||[])[1] || 0);
+    if(yy && (yy < 2025 || yy > 2035)) return ymd(now());
+    return d;
+  }
+
+  async function parseVoiceAuto(text){
+    const t = (text || '').trim();
+    if(!t) return { type:'error', message:'你没有输入内容。' };
+    // 只要配了 Key，就尝试 AI；失败再回退到本地规则
+    let aiErr = null;
+    if(state.ai?.apiKey){
+      const aiParsed = await parseVoiceWithAI(t);
+      const norm = normalizeActions(aiParsed);
+      if(norm && norm.type !== 'error') return norm;
+      if(aiParsed && aiParsed.type === 'error') aiErr = aiParsed.message || 'AI 解析失败';
+    }
+    const local = parseVoiceManyLocal(t) || parseVoice(t);
+    if(local) return local;
+    return { type:'error', message: aiErr ? `AI没解析出来：${aiErr}；本地规则也没匹配到。你可以试试：例如“我昨天吃饭花了50”“本月水果花了16”“把本月水果预算改成150”。` : '本地规则没匹配到。你可以试试：例如“我昨天吃饭花了50”“本月水果花了16”“把本月水果预算改成150”。' };
+  }
+
+  async function parseVoiceWithAI(text){
+    const apiKey = state.ai.apiKey;
+    const model = state.ai.model || 'openai/gpt-4o-mini';
+    const url = 'https://openrouter.ai/api/v1/chat/completions';
+
+    const todayStr = ymd(now());
+    const extras = state.budgets?.categoriesExtra || [];
+    const extraNames = extras.map(x => x?.name).filter(Boolean).slice(0, 20);
+    const extraHint = extraNames.length ? `自定义类别名称可能包含：${extraNames.join('、')}。如果用户说了这些名称，请把 category 填成对应名称（或最接近的类别）。` : '当前没有自定义类别。';
+    const system = [
+      '你是一个记账与预算助手，只输出严格 JSON，不要输出任何解释文字。',
+      `今天是 ${todayStr}（YYYY-MM-DD）。如果用户没说日期，date 必须填今天。`,
+      '从用户中文口述中识别动作列表，输出必须是 JSON 数组，每个元素是一个动作对象（支持一条语音/文本里包含多条指令，上不封顶）。',
+      '每个动作对象必须包含 source 字段（字符串），表示该动作对应的原始子句（用于日期/餐别推断）。',
+      '每个动作对象的 type 只能是：add_txn / set_budget / add_category。',
+      'category 优先使用 id：food, fruit, snack, fun, med, net, daily, income；如果是自定义类别，可以填它的中文名称。',
+      'meal 只能使用：breakfast, lunch, dinner, supper（只在 category=food 时出现）。',
+      'set_budget 的 target 只能使用：month.fruit, month.snack, month.fun, month.med, month.net, month.daily, food_daily.lunch, food_daily.dinner, food_daily.supper。',
+      '兼容旧说法：如果你输出 week.fruit / week.snack 也可以（系统会当成按月）。',
+      '金额 amount 必须是数字。',
+      'date 如果用户没说，填今天的 YYYY-MM-DD。',
+      extraHint,
+      'JSON 例子：[{"type":"add_txn","kind":"expense","category":"food","meal":"lunch","amount":28,"date":"2026-08-27","source":"今天午餐花了28"},{"type":"set_budget","target":"month.fruit","value":150,"source":"把本月水果预算改成150"}]'
+    ].join('\\n');
+
+    const payload = {
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: text }
+      ],
+      max_tokens: 600,
+      temperature: 0
+    };
+
+    try{
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': 'http://localhost',
+          'X-Title': 'BudgetVoicePrototype'
+        },
+        body: JSON.stringify(payload)
+      });
+      const raw = await res.text();
+      if(!res.ok){
+        return { type:'error', message:`HTTP ${res.status}：${raw.slice(0, 120)}` };
+      }
+      let content = '';
+      try{
+        content = JSON.parse(raw)?.choices?.[0]?.message?.content || '';
+      }catch(e){
+        return { type:'error', message:'返回不是 JSON（可能被浏览器拦截/CORS/网关异常）。' };
+      }
+      const jsonText = content.trim().replace(/^```json\\s*/,'').replace(/^```\\s*/,'').replace(/```$/,'').trim();
+      let obj = null;
+      try{
+        obj = JSON.parse(jsonText);
+      }catch(e){
+        return { type:'error', message:`AI 返回内容不是 JSON：${jsonText.slice(0, 120)}` };
+      }
+      if(!Array.isArray(obj)) return { type:'error', message:'AI 输出不是 JSON 数组。' };
+
+      const actions = [];
+      const warnings = [];
+      for(const item of obj){
+        if(!item || typeof item !== 'object'){ warnings.push('有一条不是对象，已跳过'); continue; }
+        if(!['add_txn','set_budget','add_category'].includes(item.type)){ warnings.push('有一条 type 不合法，已跳过'); continue; }
+        const source = String(item.source || '').trim();
+        if(!source){ warnings.push('有一条缺少 source（原始子句），已跳过'); continue; }
+
+        if(item.type === 'add_txn'){
+          const out = { ...item };
+          const cat = normalizeCategory(out.category);
+          if(!cat){ warnings.push(`无法识别类别：${String(out.category||'')}`); continue; }
+          out.category = cat;
+          if(!['expense','income'].includes(out.kind)) out.kind = (out.category === 'income' ? 'income' : 'expense');
+          const amt = Number(out.amount);
+          if(!isFinite(amt)){ warnings.push(`金额不是数字：${String(out.amount||'')}`); continue; }
+          out.amount = amt;
+          out.date = normalizeDate(out.date, source);
+          if(out.category === 'food'){
+            out.meal = normalizeMeal(out.meal) || mealFromText(source) || guessMealByTime(now());
+          }else{
+            out.meal = null;
+          }
+          out.source = source;
+          actions.push(out);
+          continue;
+        }
+
+        if(item.type === 'set_budget'){
+          const out = { ...item };
+          const v = Number(out.value);
+          if(!isFinite(v)){ warnings.push(`预算值不是数字：${String(out.value||'')}`); continue; }
+          out.value = v;
+          const tgt = normalizeBudgetTarget(out.target);
+          if(!tgt){ warnings.push(`预算目标不合法：${String(out.target||'')}`); continue; }
+          out.target = tgt;
+          out.source = source;
+          actions.push(out);
+          continue;
+        }
+
+        if(item.type === 'add_category'){
+          const out = { ...item };
+          if(!out.name || !out.cycle){ warnings.push('新增类别缺少 name/cycle'); continue; }
+          const amt = Number(out.amount);
+          if(!isFinite(amt)){ warnings.push(`新增类别预算不是数字：${String(out.amount||'')}`); continue; }
+          out.amount = amt;
+          out.source = source;
+          actions.push(out);
+          continue;
+        }
+      }
+
+      if(!actions.length) return { type:'error', message:'AI 返回了数组，但没有一条动作通过校验。' };
+      if(actions.length === 1) return actions[0];
+      return { type:'batch', actions, warnings };
+    }catch(e){
+      return { type:'error', message:'网络异常或被浏览器拦截（可能是网络/CORS）。' };
+    }
+  }
+
+  function pretty(parsed){
+    if(parsed?.type === 'batch'){
+      const actions = parsed.actions || [];
+      const rows = actions.map((a, i) => {
+        const sum = stripHtml(pretty(a));
+        const src = a?.source ? stripHtml(String(a.source)) : '';
+        return `<div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="mono" style="font-weight:900">${i+1}. ${sum}</div>
+          ${src ? `<div class="sub" style="margin-top:4px;">原句：${src}</div>` : ''}
+        </div>`;
+      }).join('');
+      const warns = (parsed.warnings || []).slice(0, 6).map(w => `<div class="sub">- ${stripHtml(String(w))}</div>`).join('');
+      const warnHtml = warns ? `<div class="hr"></div><div class="label">已跳过/纠正</div><div style="margin-top:8px;">${warns}</div>` : '';
+      return `我理解为：共 ${actions.length} 个动作<div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">${rows}</div>${warnHtml}`;
+    }
+    if(parsed.type === 'error'){
+      const msg = stripHtml(String(parsed.message || '未知原因'));
+      return `<span style="color:${getComputedStyle(document.documentElement).getPropertyValue('--danger')}">解析失败</span>：${msg}`;
+    }
+    if(parsed.type === 'add_txn'){
+      const n = categoryName(parsed.category, parsed.meal);
+      return `我理解为：新增一笔${parsed.kind==='expense'?'支出':'收入'} · <span class="mono">${n}</span> · <span class="mono">¥${money(parsed.amount)}</span> · <span class="mono">${parsed.date}</span>`;
+    }
+    if(parsed.type === 'set_budget'){
+      return `我理解为：修改预算 <span class="mono">${parsed.target}</span> = <span class="mono">¥${money(parsed.value)}</span>`;
+    }
+    if(parsed.type === 'add_category'){
+      return `我理解为：新增类别 <span class="mono">${parsed.name}</span>（按${parsed.cycle==='day'?'日':parsed.cycle==='week'?'周':'月'}）预算 <span class="mono">¥${money(parsed.amount)}</span>`;
+    }
+    return '—';
+  }
+
+  function actionLine(a){
+    if(!a || typeof a !== 'object') return '—';
+    if(a.type === 'add_txn'){
+      const n = categoryName(a.category, a.meal);
+      return `${a.kind==='income'?'收入':'支出'} · ${n} · ¥${money(a.amount)} · ${a.date}`;
+    }
+    if(a.type === 'set_budget'){
+      const target = String(a.target||'');
+      const label = target.startsWith('month.')
+        ? `本月${categoryName(target.split('.')[1])}`
+        : target.startsWith('food_daily.')
+          ? `吃饭日预算-${target.split('.')[1]}`
+          : target;
+      return `改预算 · ${label} = ¥${money(a.value)}`;
+    }
+    if(a.type === 'add_category'){
+      return `新增类别 · ${a.name}（按${a.cycle==='day'?'日':a.cycle==='week'?'周':'月'}）= ¥${money(a.amount)}`;
+    }
+    if(a.type === 'error') return `解析失败：${a.message||''}`;
+    return '—';
+  }
+
+  function renderConfirmHtml(parsed){
+    if(parsed?.type === 'batch'){
+      const actions = parsed.actions || [];
+      const rows = actions.map((a, i) => {
+        const src = a?.source ? stripHtml(String(a.source)) : '';
+        return `<div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
+          <div class="mono" style="font-weight:900">${i+1}. ${stripHtml(actionLine(a))}</div>
+          ${src ? `<div class="sub" style="margin-top:4px;">原句：${src}</div>` : ''}
+        </div>`;
+      }).join('');
+      const warns = (parsed.warnings || []).slice(0, 6).map(w => `<div class="sub">- ${stripHtml(String(w))}</div>`).join('');
+      const warnHtml = warns ? `<div class="hr"></div><div class="label">已跳过/纠正</div><div style="margin-top:8px;">${warns}</div>` : '';
+      return `<div class="label">待执行动作（共 ${actions.length} 条）</div>
+        <div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">${rows}</div>
+        ${warnHtml}
+        <div class="hint">确认后才会真正修改你的记录/预算。</div>`;
+    }
+    return `<div class="label">待执行动作</div>
+      <div class="card" style="margin-top:10px; padding:10px; border-radius:12px; background: var(--surface-2);">
+        <div class="mono" style="font-weight:900">${stripHtml(actionLine(parsed))}</div>
+        ${parsed?.source ? `<div class="sub" style="margin-top:4px;">原句：${stripHtml(String(parsed.source))}</div>` : ''}
+      </div>
+      <div class="hint">确认后才会真正修改你的记录/预算。</div>`;
+  }
+
+  function confirmAction(parsed){
+    const body = document.createElement('div');
+    body.innerHTML = renderConfirmHtml(parsed);
+    const cancel = mkBtn('取消', 'btn', ()=> closeModal());
+    const ok = mkBtn('确认执行', 'btn primary', ()=> {
+      if(parsed?.type === 'batch'){
+        (parsed.actions || []).forEach(a => applyParsed(a));
+      }else{
+        applyParsed(parsed);
+      }
+      closeModal();
+      toast('已执行');
+      render();
+    });
+    openModal('确认执行', body, [cancel, ok]);
+  }
+
+  function applyParsed(p){
+    ensureToday(); ensureWeek(); ensureMonth();
+    if(p.type === 'add_txn'){
+      if(p.kind === 'income'){
+        addTxn({ kind:'income', category:'income', amount: p.amount, date: p.date, note: '语音录入' });
+        return;
+      }
+      addTxn({ kind:p.kind||'expense', category:p.category, meal:p.meal, amount:p.amount, date:p.date, note:'语音录入' });
+      return;
+    }
+    if(p.type === 'set_budget'){
+      // targets: month.fruit / month.snack / month.med / month.fun / month.net / food_daily.lunch...
+      const [a,b] = p.target.split('.');
+      // 兼容旧说法：以前水果/零食按周；现在按月
+      if(a === 'week' && (b==='fruit' || b==='snack')){
+        state.budgets.month[b] = p.value;
+      }
+      if(a === 'month' && (b==='fruit' || b==='snack' || b==='med' || b==='fun' || b==='net' || b==='daily')){
+        state.budgets.month[b] = p.value;
+      }
+      if(a === 'food_daily' && (b==='lunch' || b==='dinner' || b==='supper')){
+        // 口述没说“工作日/周末”时：默认同时改工作日+周末
+        state.budgets.food_daily.weekday[b] = p.value;
+        state.budgets.food_daily.weekend[b] = p.value;
+        recalcFoodForToday();
+      }
+      save();
+      return;
+    }
+    if(p.type === 'add_category'){
+      const id = 'c_' + (crypto.randomUUID ? crypto.randomUUID().slice(0,8) : Math.random().toString(16).slice(2,10));
+      state.budgets.categoriesExtra.push({ id, name: p.name, cycle: p.cycle, amount: p.amount });
+      save();
+      return;
+    }
+  }
+
+  function categoryName(categoryId, meal){
+    if(categoryId === 'food'){
+      const m = meal === 'breakfast' ? '早餐'
+        : meal === 'lunch' ? '午餐'
+        : meal === 'dinner' ? '晚餐'
+        : meal === 'supper' ? '夜宵'
+        : '吃饭';
+      return '吃饭-' + m;
+    }
+    const map = { snack:'零食', fruit:'水果', med:'药品', fun:'游玩', net:'网费', daily:'日用', income:'收入' };
+    if(map[categoryId]) return map[categoryId];
+    const extra = (state.budgets.categoriesExtra||[]).find(x => x.id === categoryId);
+    return extra ? extra.name : categoryId;
+  }
+
+  function stripHtml(html){
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    return div.textContent || div.innerText || '';
+  }
+
+  function mkBtn(text, cls, onClick){
+    const b = document.createElement('button');
+    b.className = cls;
+    b.textContent = text;
+    b.onclick = onClick;
+    return b;
+  }
+
+  function openAddCategoryModal(){
+    const body = document.createElement('div');
+    body.innerHTML = `
+      <div class="field">
+        <div class="label">类别名称</div>
+        <input class="input" id="name" placeholder="例如：交通" />
+      </div>
+      <div class="field">
+        <div class="label">周期</div>
+        <select class="select" id="cycle">
+          <option value="month">按月</option>
+          <option value="week">按周</option>
+          <option value="day">按日</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="label">预算额度</div>
+        <input class="input" id="amount" type="number" placeholder="例如 300" />
+      </div>
+      <div class="hint">新增后会在账本页“自定义类别”里出现，也可以用语音新增。</div>
+    `;
+    const cancel = mkBtn('取消', 'btn', ()=> closeModal());
+    const ok = mkBtn('新增', 'btn primary', ()=> {
+      const name = ($('#name', body).value || '').trim();
+      const cycle = $('#cycle', body).value;
+      const amount = Number($('#amount', body).value || 0);
+      if(!name){ toast('名字不能为空'); return; }
+      if(!amount || amount<=0){ toast('预算要大于0'); return; }
+      applyParsed({ type:'add_category', name, cycle, amount });
+      closeModal();
+      toast('已新增类别');
+      render();
+    });
+    openModal('新增类别', body, [cancel, ok]);
+  }
+
+  // reset
+  $('#resetAll').onclick = () => {
+    localStorage.removeItem(LS_KEY);
+    // 测试用“模拟时间”也一起清掉（你点清空数据，就回到真实时间）
+    clearSimShift();
+    state = defaultState();
+    // init food for today
+    const b = foodBudgetForDate(now());
+    state.cycles.month.food.dayStartBalance = 0;
+    state.cycles.month.food.todaySpent = 0;
+    state.cycles.month.food.todayKey = ymd(now());
+    state.cycles.month.food.monthBalance = b.total;
+    save();
+    toast('已清空并重置');
+    render();
+  };
+
+  // restore backup
+  $('#restoreBackup').onclick = () => {
+    try{
+      const raw = localStorage.getItem(LS_KEY + '_backup');
+      if(!raw){ toast('没有备份'); return; }
+      const obj = JSON.parse(raw);
+      if(!obj){ toast('备份损坏'); return; }
+      state = obj;
+      migrateState();
+      save();
+      toast('已从备份恢复');
+      render();
+    }catch(e){
+      toast('恢复失败');
+    }
+  };
+
+  // nav
+  $$('.nav button').forEach(b => {
+    b.addEventListener('click', () => {
+      currentTab = b.dataset.tab;
+      render();
+    });
+  });
+
+  // init food daily add on first run
+  if(!state.cycles.month.food.todayKey){
+    state.cycles.month.food.todayKey = ymd(now());
+  }
+  // 兼容旧数据/异常数据：保证关键字段都有数值
+  if(typeof state.cycles.month.food.dayStartBalance !== 'number') state.cycles.month.food.dayStartBalance = 0;
+  if(typeof state.cycles.month.food.todaySpent !== 'number') state.cycles.month.food.todaySpent = 0;
+  if(typeof state.cycles.month.food.monthBalance !== 'number' || !isFinite(state.cycles.month.food.monthBalance)){
+    recalcFoodForToday();
+    save();
+  }
+
+  render();
+})();
+</script>
+
+
+</body></html>
