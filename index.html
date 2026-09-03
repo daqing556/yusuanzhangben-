@@ -319,7 +319,7 @@
     font-weight: 700;
   }
   .qinput{
-    width: 140px;
+    width: 70px;
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 10px 12px;
@@ -1185,13 +1185,13 @@
     return baseFood + weekBase + monthBase + dayBase;
   }
 
-  function ensureToday(){
+  function ensureToday(forceRebuild = false){
     const todayKey = ymd(now());
-    if(state.cycles.month.food.todayKey !== todayKey){
-      // 时间追溯补账（Catch-up）机制：计算跳过的天数
+    if(state.cycles.month.food.todayKey !== todayKey || forceRebuild){
+      // 时间追溯补账（Catch-up）机制：计算跳过的天数 (非强制重建时执行)
       const food = state.cycles.month.food;
       const prevDayKey = food.todayKey;
-      if (prevDayKey) {
+      if (prevDayKey && !forceRebuild) {
         let current = new Date(prevDayKey);
         current.setDate(current.getDate() + 1);
         const target = new Date(todayKey);
@@ -1216,14 +1216,14 @@
     }
   }
 
-  function ensureWeek(){
+  function ensureWeek(forceRebuild = false){
     const wk = weekKey(now());
-    if(state.cycles.week.key !== wk){
+    if(state.cycles.week.key !== wk || forceRebuild){
       const prevWk = state.cycles.week.key;
       const mk = state.cycles.month.key;
       
-      // 时间追溯补账（Catch-up）机制：计算跳过的周数
-      if(prevWk) {
+      // 时间追溯补账（Catch-up）机制：计算跳过的周数 (仅在非强制重建时执行，避免重复累加)
+      if(prevWk && !forceRebuild) {
         let currentWkStr = prevWk;
         const wkFactor = 52/12;
         const weeklyFruit = Math.round(Number(state.budgets.month.fruit||0) / wkFactor);
@@ -1278,11 +1278,13 @@
     }
   }
 
-  function ensureMonth(){
+  function ensureMonth(forceRebuild = false){
     const mk = ym(now());
-    if(state.cycles.month.key !== mk){
-      // 月底结算：直接按“首页月总剩余”收口；之前的日/周过程池在这里统一清掉
-      settleMonth();
+    if(state.cycles.month.key !== mk || forceRebuild){
+      // 只有在不是强制重建时，才结算上个月（避免导入时结算出奇怪的数据）
+      if(state.cycles.month.key && state.cycles.month.key !== mk && !forceRebuild) {
+        settleMonth();
+      }
       // reset month cycle
       state.cycles.month.key = mk;
       state.meta.monthKey = mk;
@@ -2607,8 +2609,48 @@
           }));
         }
 
+        // 3. 强制重算 B 层结算数据 (cycles)
+        // 这一步非常关键，否则导入流水后主页的可用预算不会扣减
+        
+        // 我们要从头计算当前的 cycles 状态
+        state.cycles.week = {}; // 清空当前周数据缓存
+        
+        // 对月度预算做特殊处理
+        const currentMonthKey = ymd(now()).substring(0,7);
+        state.cycles.month.key = ''; // 强行清空，让 ensureMonth 重跑结算
+        
+        // 吃饭结余计算非常复杂，我们需要基于当月的历史重新推算
+        // 为了安全起见，这里直接重置当月统计
+        state.cycles.month.food = {}; 
+        state.cycles.month.weekCarry = {}; 
+        
+        // 这三个核心函数会根据当前时间 (now) 和最新的 state.txns 重新算出正确的 cycles 数据
+        ensureMonth(true); 
+        ensureWeek(true);
+        ensureToday(true);
+
+        // 补上今天和本周的花费
+        const todayStr = ymd(now());
+        const wkStr = weekKey(now());
+        
+        state.txns.filter(t => t.date.startsWith(currentMonthKey)).forEach(t => {
+          if(t.kind === 'expense') {
+            if(t.category === 'food') {
+               // 扣减当月饭费结余
+               state.cycles.month.food.monthBalance -= t.amount;
+               if(t.date === todayStr) {
+                 state.cycles.month.food.todaySpent += t.amount;
+               }
+            } else if(t.weekKey === wkStr) {
+               // 累加本周其他开销
+               if(!state.cycles.week[t.category]) state.cycles.week[t.category] = {spent: 0};
+               state.cycles.week[t.category].spent += t.amount;
+            }
+          }
+        });
+        
         save();
-        toast('数据导入成功！');
+        toast('数据导入成功，预算已重新结算！');
         render();
       } catch (err) {
         console.error(err);
