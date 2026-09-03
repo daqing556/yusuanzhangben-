@@ -2584,9 +2584,15 @@
               }
             }
 
+            const d = new Date(row['日期'] + 'T12:00:00');
+            const mk = ym(d) || row['日期'].substring(0,7);
+            const wk = weekKey(d) || ymd(startOfWeekMonday(d));
+
             return {
               id: 't_' + (crypto.randomUUID ? crypto.randomUUID().slice(0,8) : Math.random().toString(16).slice(2,10)),
               date: row['日期'],
+              monthKey: mk,
+              weekKey: wk,
               kind,
               category,
               meal,
@@ -2633,21 +2639,30 @@
         const todayStr = ymd(now());
         const wkStr = weekKey(now());
         
-        state.txns.filter(t => t.date.startsWith(currentMonthKey)).forEach(t => {
+        // 我们要累加当前月所有的饭费开销，以及当前周所有的其他开销
+        state.txns.forEach(t => {
           if(t.kind === 'expense') {
-            if(t.category === 'food') {
-               // 扣减当月饭费结余
+            // 饭费：严格按当月扣除 (只要是当前月的记录)
+            if(t.category === 'food' && t.date.startsWith(currentMonthKey)) {
                state.cycles.month.food.monthBalance -= t.amount;
                if(t.date === todayStr) {
                  state.cycles.month.food.todaySpent += t.amount;
                }
-            } else if(t.weekKey === wkStr) {
-               // 累加本周其他开销
+            } 
+            // 其他周期费用：如果属于当前自然周，则累加到 week 周期里扣减
+            else if(t.weekKey === wkStr && t.category !== 'food') {
+               // 这里要注意，如果是按月结算的类别 (如 net, daily, fun, med, snack, fruit)
+               // 我们在 calcRemainingForCategory 里面对于 month 周期的直接读了 sumSpentMonth
+               // 但对于 week 周期的 (snack, fruit, fun 等)，它是读的 state.cycles.week[catId].spent
                if(!state.cycles.week[t.category]) state.cycles.week[t.category] = {spent: 0};
                state.cycles.week[t.category].spent += t.amount;
             }
           }
         });
+        
+        // 特别注意：导入后 dayStartBalance 应该根据最新的 monthBalance 推算
+        // 为了避免今天导入的数据导致今天剩余饭费出现错乱，我们强行校准 dayStartBalance
+        state.cycles.month.food.dayStartBalance = state.cycles.month.food.monthBalance + state.cycles.month.food.todaySpent;
         
         save();
         toast('数据导入成功，预算已重新结算！');
