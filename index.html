@@ -2,21 +2,9 @@
 <html lang="zh-CN"><head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="预算账本">
-  <link rel="manifest" href="./manifest.json">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%236d28d9'/%3E%3Ctext x='50' y='50' font-size='50' text-anchor='middle' alignment-baseline='central' fill='white'%3E%24%3C/text%3E%3C/svg%3E">
   <title>语音 + 预算账本（可点击原型）</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js');
-      });
-    }
-  </script>
 </head>
 <body>
 <style>
@@ -38,7 +26,6 @@
     --r999: 999px;
   }
   *{ box-sizing: border-box; }
-  html,body{ height:100%; }
   body{
     margin:0;
     font-family: var(--font);
@@ -188,6 +175,7 @@
     padding: 12px;
   }
   .card + .card{ margin-top: 12px; }
+  .grid2 > .card { margin-top: 0 !important; height: 100%; box-sizing: border-box; }
   .h{
     margin:0;
     font-size: 14px;
@@ -309,9 +297,6 @@
     grid-template-columns: 1fr 1fr;
     gap: 10px 12px;
   }
-  @media (max-width: 520px){
-    .qtable{ grid-template-columns: 1fr; }
-  }
   .qrow{
     display:flex;
     align-items:center;
@@ -430,9 +415,6 @@
     grid-template-columns: repeat(3, 1fr);
     gap: 10px;
     margin-top: 10px;
-  }
-  @media (max-width: 520px){
-    .quickGrid{ grid-template-columns: 1fr; }
   }
   .quickSectionTitle{
     margin-top: 12px;
@@ -1514,6 +1496,20 @@
   }
 
   function render(){
+    const scrollY = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+    const screenScrollY = screen ? screen.scrollTop : 0;
+
+    // Lock body and html height to prevent scroll jump during DOM replacement
+    const oldBodyMinHeight = document.body.style.minHeight;
+    const oldHtmlMinHeight = document.documentElement.style.minHeight;
+    const currentHeight = Math.max(
+      document.body.scrollHeight, 
+      document.documentElement.scrollHeight, 
+      window.innerHeight
+    ) + 'px';
+    document.body.style.minHeight = currentHeight;
+    document.documentElement.style.minHeight = currentHeight;
+
     ensureMonth(); ensureWeek(); ensureToday();
     titleEl.textContent = currentTab === 'ledger' ? '账本'
       : currentTab === 'voice' ? '语音'
@@ -1529,6 +1525,27 @@
     // 右侧面板里的“模拟工具”保持常驻
     renderSideSimulators();
     syncRightPanelFloating();
+
+    // Force layout calculation
+    document.body.offsetHeight;
+    document.documentElement.offsetHeight;
+    if (screen) screen.offsetHeight;
+
+    window.scrollTo(0, scrollY);
+    if(screen) screen.scrollTop = screenScrollY;
+
+    // Double check scroll and restore minHeight after a short delay
+    setTimeout(() => {
+      window.scrollTo(0, scrollY);
+      if(screen) screen.scrollTop = screenScrollY;
+      document.body.style.minHeight = oldBodyMinHeight;
+      document.documentElement.style.minHeight = oldHtmlMinHeight;
+    }, 50);
+    
+    // Fallback for iOS Safari which might need a longer delay after paint
+    setTimeout(() => {
+      window.scrollTo(0, scrollY);
+    }, 150);
   }
 
   window.addEventListener('resize', syncRightPanelFloating);
@@ -1575,15 +1592,15 @@
     wrap.appendChild(cardMonth(month, usedPct, remainPct));
     wrap.appendChild(cardQuickAdd());
     wrap.appendChild(cardFood(food, totalToday, remainToday));
+    wrap.appendChild(cardTwo('本月水果 / 零食', [
+      {name:'水果', remain: fruit.remain, total: fruit.total, lines: fruit.lines},
+      {name:'零食', remain: snack.remain, total: snack.total, lines: snack.lines},
+    ]));
     wrap.appendChild(cardTwo('本月游玩 / 药品 / 网费 / 日用', [
       {name:'游玩', remain: fun.remain, total: fun.total},
       {name:'药品', remain: med.remain, total: med.total},
       {name:'网费', remain: net.remain, total: net.total},
       {name:'日用', remain: daily.remain, total: daily.total},
-    ]));
-    wrap.appendChild(cardTwo('本月水果 / 零食', [
-      {name:'水果', remain: fruit.remain, total: fruit.total, lines: fruit.lines},
-      {name:'零食', remain: snack.remain, total: snack.total, lines: snack.lines},
     ]));
 
     // extra categories summary (if any)
@@ -1786,13 +1803,19 @@
           list.length
             ? list.map(t => `
               <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
-                <div class="row">
-                  <div style="display:flex; flex-direction:column;">
+                <div class="row" style="align-items:flex-start;">
+                  <div style="display:flex; flex-direction:column; flex:1;">
                     <div class="mono" style="font-weight:900">${t.kind==='expense'?'支出':'收入'} · ${categoryName(t.category, t.meal)}</div>
                     <div class="sub">${t.date} · ${t.note || '—'}</div>
                   </div>
-                  <div class="mono" style="font-weight:900; color:${t.kind==='expense'?'#dc2626':'#16a34a'}">
-                    ${t.kind==='expense'?'-':'+'}¥ ${money(t.amount)}
+                  <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                    <div class="mono" style="font-weight:900; color:${t.kind==='expense'?'#dc2626':'#16a34a'}">
+                      ${t.kind==='expense'?'-':'+'}¥ ${money(t.amount)}
+                    </div>
+                    <div style="display:flex; gap:8px; margin-top:4px;">
+                      <button class="btn small edit-txn-recent" data-id="${t.id}" style="padding:4px 8px;">修改</button>
+                      <button class="btn small danger del-txn-recent" data-id="${t.id}" style="padding:4px 8px;">删除</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1804,6 +1827,21 @@
     setTimeout(()=>{
       const b = el.querySelector('[data-act="toHistory"]');
       if(b) b.onclick = ()=>{ currentTab='history'; render(); };
+      $$('.edit-txn-recent', el).forEach(b => {
+        b.onclick = (e) => {
+          e.preventDefault();
+          const t = state.txns.find(x => x.id === b.dataset.id);
+          if(t) openTxnModal(t, true);
+        };
+      });
+      $$('.del-txn-recent', el).forEach(b => {
+        b.onclick = (e) => {
+          e.preventDefault();
+          deleteTxn(b.dataset.id);
+          toast('已删除');
+          render();
+        };
+      });
     },0);
     return el;
   }
@@ -2411,13 +2449,19 @@
         <div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
           ${list.length ? list.map(t => `
             <div class="card" style="padding:10px; border-radius:12px; background: var(--surface-2);">
-              <div class="row">
-                <div style="display:flex; flex-direction:column;">
+              <div class="row" style="align-items:flex-start;">
+                <div style="display:flex; flex-direction:column; flex:1;">
                   <div class="mono" style="font-weight:900">${t.kind==='expense'?'支出':'收入'} · ${categoryName(t.category, t.meal)}</div>
                   <div class="sub">${t.date} · ${t.note || '—'}</div>
                 </div>
-                <div class="mono" style="font-weight:900; color:${t.kind==='expense'?'#dc2626':'#16a34a'}">
-                  ${t.kind==='expense'?'-':'+'}¥ ${money(t.amount)}
+                <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                  <div class="mono" style="font-weight:900; color:${t.kind==='expense'?'#dc2626':'#16a34a'}">
+                    ${t.kind==='expense'?'-':'+'}¥ ${money(t.amount)}
+                  </div>
+                  <div style="display:flex; gap:8px; margin-top:4px;">
+                    <button class="btn small edit-txn" data-id="${t.id}" style="padding:4px 8px;">修改</button>
+                    <button class="btn small danger del-txn" data-id="${t.id}" style="padding:4px 8px;">删除</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2427,6 +2471,8 @@
         <div class="row" style="margin-top:12px;">
           <button class="btn" id="addTxn2">记一笔</button>
           <button class="btn" id="exportExcel">导出 Excel</button>
+          <button class="btn" id="importExcelBtn">导入 Excel</button>
+          <input type="file" id="importExcelFile" accept=".xlsx, .xls" style="display:none;" />
           <button class="btn primary" id="goLedger2">回账本</button>
         </div>
       </div>
@@ -2435,7 +2481,27 @@
     screen.appendChild(el);
     $('#addTxn2').onclick = () => openTxnModal({});
     $('#exportExcel').onclick = exportToExcel;
+    $('#importExcelBtn').onclick = () => $('#importExcelFile').click();
+    $('#importExcelFile').onchange = importFromExcel;
     $('#goLedger2').onclick = () => { currentTab='ledger'; render(); };
+
+    setTimeout(() => {
+      $$('.edit-txn', el).forEach(b => {
+        b.onclick = (e) => {
+          e.preventDefault();
+          const t = state.txns.find(x => x.id === b.dataset.id);
+          if(t) openTxnModal(t, true);
+        };
+      });
+      $$('.del-txn', el).forEach(b => {
+        b.onclick = (e) => {
+          e.preventDefault();
+          deleteTxn(b.dataset.id);
+          toast('已删除');
+          render();
+        };
+      });
+    }, 0);
 
     if(hasStats){
       setTimeout(() => {
@@ -2484,6 +2550,75 @@
   }
 
   // --- Add transaction
+  function importFromExcel(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      try {
+        const data = evt.target.result;
+        const wb = XLSX.read(data, { type: 'binary' });
+
+        // 1. 导入明细数据
+        if (wb.SheetNames.includes("账单明细")) {
+          const wsTxns = wb.Sheets["账单明细"];
+          const txnsData = XLSX.utils.sheet_to_json(wsTxns);
+          const newTxns = txnsData.map(row => {
+            const kind = row['类型'] === '收入' ? 'income' : 'expense';
+            const catStr = row['类别'] || '';
+            let category = 'daily', meal = null;
+
+            if (catStr.startsWith('吃饭-')) {
+              category = 'food';
+              const m = catStr.replace('吃饭-', '');
+              meal = m === '早餐' ? 'breakfast' : m === '午餐' ? 'lunch' : m === '晚餐' ? 'dinner' : m === '夜宵' ? 'supper' : 'breakfast';
+            } else {
+              const map = { '零食':'snack', '水果':'fruit', '药品':'med', '游玩':'fun', '网费':'net', '日用':'daily', '收入':'income' };
+              if (map[catStr]) {
+                category = map[catStr];
+              } else {
+                const extra = (state.budgets.categoriesExtra||[]).find(x => x.name === catStr);
+                if (extra) category = extra.id;
+              }
+            }
+
+            return {
+              id: 't_' + (crypto.randomUUID ? crypto.randomUUID().slice(0,8) : Math.random().toString(16).slice(2,10)),
+              date: row['日期'],
+              kind,
+              category,
+              meal,
+              amount: Number(row['金额']) || 0,
+              note: row['备注'] || ''
+            };
+          });
+          state.txns = newTxns;
+        }
+
+        // 2. 导入月度统计数据
+        if (wb.SheetNames.includes("月度报表")) {
+          const wsStats = wb.Sheets["月度报表"];
+          const statsData = XLSX.utils.sheet_to_json(wsStats);
+          state.monthlyStats = statsData.map(row => ({
+            monthKey: row['月份'],
+            budget: Number(row['月总预算']) || 0,
+            spent: Number(row['总花销']) || 0,
+            saved: Number(row['节省结余']) || 0
+          }));
+        }
+
+        save();
+        toast('数据导入成功！');
+        render();
+      } catch (err) {
+        console.error(err);
+        toast('导入失败，请检查文件格式');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = ''; // Reset
+  }
+
   function exportToExcel() {
     const wb = XLSX.utils.book_new();
 
@@ -2515,7 +2650,31 @@
     toast('已开始下载 Excel');
   }
 
-  function openTxnModal(preset){
+  function deleteTxn(txId) {
+    const idx = state.txns.findIndex(x => x.id === txId);
+    if(idx < 0) return;
+    const tx = state.txns[idx];
+    state.txns.splice(idx, 1);
+    if(tx.kind === 'expense'){
+      const oldAmount = tx.amount;
+      if(tx.category === 'food' && tx.date === state.cycles.month.food.todayKey){
+        state.cycles.month.food.todaySpent = Math.max(0, state.cycles.month.food.todaySpent - oldAmount);
+        state.cycles.month.food.monthBalance = Number(state.cycles.month.food.monthBalance||0) + oldAmount;
+      }
+      if(tx.weekKey === state.cycles.week.key){
+        const cat = categoryList().find(c => c.id === tx.category);
+        if(cat && cat.cycle === 'week'){
+          if(!state.cycles.week[tx.category]) state.cycles.week[tx.category] = { spent: 0 };
+          state.cycles.week[tx.category].spent = Math.max(0, Number(state.cycles.week[tx.category].spent||0) - oldAmount);
+        }
+      }
+      updateMonthlyStatsForTxn({...tx, amount: 0}, oldAmount);
+      recalcOverdraftForTxn(tx);
+    }
+    save();
+  }
+
+  function openTxnModal(preset, isEdit = false){
     ensureToday(); ensureWeek(); ensureMonth();
     const cats = categoryList();
     const body = document.createElement('div');
@@ -2583,12 +2742,15 @@
         toast('金额要大于 0');
         return;
       }
+      if (isEdit && preset.id) {
+        deleteTxn(preset.id);
+      }
       addTxn({ kind, category, meal: category==='food' ? meal : null, amount, date, note });
       closeModal();
-      toast('已保存一笔');
+      toast(isEdit ? '修改成功' : '已保存一笔');
       render();
     });
-    openModal('记一笔', body, [cancel, ok]);
+    openModal(isEdit ? '修改记录' : '记一笔', body, [cancel, ok]);
   }
 
   function addTxn(t){
