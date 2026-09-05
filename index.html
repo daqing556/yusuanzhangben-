@@ -1872,10 +1872,10 @@
     const el = document.createElement('div');
     el.className = 'card';
     // 吃饭字段口径：
-    // - 当月结余：到“今天开始”为止的累计结余（不含今日预算）
+    // - 当月结余：到“今天开始”为止的累计结余（不含今日预算）。等于目前总剩余 (monthBalance) - 今天的初始预算
     // - 今日预算剩余：今日预算 - 今日已花（每天自动更新）
-    const monthCarry = Number(food.dayStartBalance||0);
     const todayBudget = Number(foodBudgetForDate(now()).total || 0);
+    const monthCarry = Number(food.dayStartBalance || 0) - todayBudget;
     const todaySpent = Number(food.todaySpent || 0);
     const todayRemain = todayBudget - todaySpent;
     const monthBudgetTotal = foodMonthBudgetForMonth(now());
@@ -2615,6 +2615,27 @@
           }));
         }
 
+        // 2.5 导入自定义类别
+        if (wb.SheetNames.includes("自定义类别")) {
+          const wsExtra = wb.Sheets["自定义类别"];
+          const extraData = XLSX.utils.sheet_to_json(wsExtra);
+          if (!state.budgets.categoriesExtra) state.budgets.categoriesExtra = [];
+          
+          extraData.forEach(row => {
+            const name = row['类别名称'];
+            const cycle = row['结算周期'] === '按周' ? 'week' : row['结算周期'] === '按月' ? 'month' : 'day';
+            const amount = Number(row['预算金额']) || 0;
+            
+            // 查重，如果没有才加
+            if(name && !state.budgets.categoriesExtra.find(x => x.name === name)) {
+              state.budgets.categoriesExtra.push({
+                id: 'ex_' + (crypto.randomUUID ? crypto.randomUUID().slice(0,6) : Math.random().toString(16).slice(2,8)),
+                name, cycle, amount
+              });
+            }
+          });
+        }
+
         // 3. 强制重算 B 层结算数据 (cycles)
         // 这一步非常关键，否则导入流水后主页的可用预算不会扣减
         
@@ -2631,13 +2652,26 @@
         state.cycles.month.weekCarry = {}; 
         
         // 这三个核心函数会根据当前时间 (now) 和最新的 state.txns 重新算出正确的 cycles 数据
+        // 但是对于强制重算，ensureMonth(true) + ensureToday(true) 会把 monthBalance 重置为仅当天的预算(40)
+        // 从而丢失了 1号 到 昨天的所有预算累计！
         ensureMonth(true); 
         ensureWeek(true);
         ensureToday(true);
 
-        // 补上今天和本周的花费
+        // 所以我们要手动重新累加当月到今天为止的【总预算】
         const todayStr = ymd(now());
         const wkStr = weekKey(now());
+        
+        let accumulatedFoodBudget = 0;
+        let d = new Date(currentMonthKey + '-01T12:00:00');
+        const end = new Date(todayStr + 'T12:00:00');
+        while(d <= end) {
+          accumulatedFoodBudget += foodBudgetForDate(d).total;
+          d.setDate(d.getDate() + 1);
+        }
+        
+        state.cycles.month.food.monthBalance = accumulatedFoodBudget;
+        state.cycles.month.food.todaySpent = 0; // 重置，下面循环重新累加
         
         // 我们要累加当前月所有的饭费开销，以及当前周所有的其他开销
         state.txns.forEach(t => {
@@ -2702,6 +2736,17 @@
       XLSX.utils.book_append_sheet(wb, wsStats, "月度报表");
     }
 
+    // 3. 导出自定义类别配置
+    if (state.budgets.categoriesExtra && state.budgets.categoriesExtra.length > 0) {
+      const extraData = state.budgets.categoriesExtra.map(c => ({
+        '类别名称': c.name,
+        '结算周期': c.cycle === 'week' ? '按周' : c.cycle === 'month' ? '按月' : '按日',
+        '预算金额': c.amount
+      }));
+      const wsExtra = XLSX.utils.json_to_sheet(extraData);
+      XLSX.utils.book_append_sheet(wb, wsExtra, "自定义类别");
+    }
+
     // 下载文件
     XLSX.writeFile(wb, "预算账本数据.xlsx");
     toast('已开始下载 Excel');
@@ -2714,9 +2759,12 @@
     state.txns.splice(idx, 1);
     if(tx.kind === 'expense'){
       const oldAmount = tx.amount;
-      if(tx.category === 'food' && tx.date === state.cycles.month.food.todayKey){
-        state.cycles.month.food.todaySpent = Math.max(0, state.cycles.month.food.todaySpent - oldAmount);
+      if(tx.category === 'food' && tx.monthKey === state.cycles.month.key) {
         state.cycles.month.food.monthBalance = Number(state.cycles.month.food.monthBalance||0) + oldAmount;
+        if(tx.date === state.cycles.month.food.todayKey) {
+          state.cycles.month.food.todaySpent = Math.max(0, state.cycles.month.food.todaySpent - oldAmount);
+        }
+        state.cycles.month.food.dayStartBalance = state.cycles.month.food.monthBalance + state.cycles.month.food.todaySpent;
       }
       if(tx.weekKey === state.cycles.week.key){
         const cat = categoryList().find(c => c.id === tx.category);
@@ -2831,10 +2879,13 @@
 
     // apply to current-cycle counters only if txn is within current cycle keys (prototype simplification)
     if(tx.kind === 'expense'){
-      if(tx.category === 'food' && tx.date === state.cycles.month.food.todayKey){
-        state.cycles.month.food.todaySpent += tx.amount;
+      if(tx.category === 'food' && tx.monthKey === state.cycles.month.key) {
         state.cycles.month.food.monthBalance -= tx.amount;
+        if(tx.date === state.cycles.month.food.todayKey) {
+          state.cycles.month.food.todaySpent += tx.amount;
+        }
         if(!isFinite(state.cycles.month.food.monthBalance)) state.cycles.month.food.monthBalance = 0;
+        state.cycles.month.food.dayStartBalance = state.cycles.month.food.monthBalance + state.cycles.month.food.todaySpent;
       }
       if(tx.weekKey === state.cycles.week.key){
         // 周期为“周”的类别都在这里累计 spent（含自定义周类别）
