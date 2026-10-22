@@ -208,6 +208,13 @@
   .bar > div{ height: 100%; background: var(--brand); width: 0%; }
 
   .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid2 > *, .qtable > *, .grid2 .row > *, .qrow > *{ min-width:0; }
+  .grid2 .mono, .grid2 .sub, .qrow .qlabel{ overflow-wrap:anywhere; white-space:normal; }
+  .qrow > div{ flex:1; }
+  .qtable .qrow{ min-width:0; }
+  .qinput{ flex-shrink:0; }
+  [data-extra-rows]{ display: contents; }
+  #extraList .input, #extraList .select{ min-width:0; }
   .mono{ font-family: var(--mono); }
 
   .btn{
@@ -819,10 +826,19 @@
   const pad2 = n => String(n).padStart(2,'0');
   const ymd = (d=new Date()) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
   const ym = (d=new Date()) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}`;
+  const cents = n => {
+    const value = Number(n) || 0;
+    return Math.round((value + Math.sign(value) * Number.EPSILON) * 100);
+  };
+  const fromCents = n => n === 0 ? 0 : n / 100;
+  const sumMoney = values => fromCents(values.reduce((sum, n) => sum + cents(n), 0));
+  const subtractMoney = (a, b) => fromCents(cents(a) - cents(b));
+  const multiplyMoney = (a, count) => fromCents(cents(a) * count);
   const money = n => {
-    const sign = n < 0 ? '-' : '';
-    const abs = Math.abs(Math.round(n));
-    return sign + abs.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const value = Number(n);
+    const rounded = Math.round((Number.isFinite(value) ? fromCents(cents(value)) : 0) * 10);
+    const fixed = (rounded === 0 ? 0 : rounded / 10).toFixed(1);
+    return fixed.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   };
 
   function maskKey(k){
@@ -915,6 +931,7 @@
     }
   }
   function save(){
+    rebuildRealtime();
     const raw = JSON.stringify(state);
     localStorage.setItem(LS_KEY, raw);
     // 额外备份一份，避免你更新页面后“感觉数据没了”
@@ -1054,9 +1071,9 @@
 
     // 只有支出影响报表（收入目前原型暂不统计）
     if (tx.kind === 'expense') {
-      const diff = Number(tx.amount || 0) - Number(oldAmount || 0);
-      state.monthlyStats[statIndex].spent += diff;
-      state.monthlyStats[statIndex].saved -= diff;
+      const diff = subtractMoney(tx.amount, oldAmount);
+      state.monthlyStats[statIndex].spent = sumMoney([state.monthlyStats[statIndex].spent, diff]);
+      state.monthlyStats[statIndex].saved = subtractMoney(state.monthlyStats[statIndex].saved, diff);
     }
   }
   function isWeekend(d){
@@ -1093,7 +1110,7 @@
     const lunch = Number(src?.lunch || 0);
     const dinner = Number(src?.dinner || 0);
     const supper = Number(src?.supper || 0);
-    return { lunch, dinner, supper, total: lunch + dinner + supper };
+    return { lunch, dinner, supper, total: sumMoney([lunch, dinner, supper]) };
   }
 
   function foodMonthBudgetForMonth(d){
@@ -1104,17 +1121,13 @@
     let total = 0;
     for(let i=1; i<=days; i++){
       const x = new Date(year, month, i);
-      total += foodBudgetForDate(x).total;
+      total = sumMoney([total, foodBudgetForDate(x).total]);
     }
     return total;
   }
 
   function recalcFoodForToday(){
-    // 预算被修改后，用“今天开始余额 + 今天预算 - 今天已花”重算 monthBalance
-    const food = state.cycles.month.food;
-    const budgetTotal = foodBudgetForDate(now()).total;
-    food.monthBalance = Number(food.dayStartBalance || 0) + budgetTotal - Number(food.todaySpent || 0);
-    if(!isFinite(food.monthBalance)) food.monthBalance = 0;
+    rebuildRealtime();
   }
 
   function monthDateFromKey(monthKey){
@@ -1129,7 +1142,7 @@
     const days = new Date(info.year, info.month + 1, 0).getDate();
     let total = 0;
     for(let i=1; i<=days; i++){
-      total += foodBudgetForDate(new Date(info.year, info.month, i)).total;
+      total = sumMoney([total, foodBudgetForDate(new Date(info.year, info.month, i)).total]);
     }
     return total;
   }
@@ -1138,21 +1151,22 @@
     const baseFood = foodMonthBudgetForMonthKey(monthKey);
     const month = state.budgets.month;
     const extras = state.budgets.categoriesExtra || [];
-    const extraMonth = extras.filter(x => x.cycle==='month').reduce((s,x)=> s + Number(x.amount||0), 0);
-    const extraWeek = extras.filter(x => x.cycle==='week').reduce((s,x)=> s + Number(x.amount||0), 0);
-    const extraDay = extras.filter(x => x.cycle==='day').reduce((s,x)=> s + Number(x.amount||0), 0);
-    const weekBase = extraWeek * 4;
-    const monthBase = Number(month.med||0) + Number(month.fun||0) + Number(month.net||0) + Number(month.daily||0) + Number(month.snack||0) + Number(month.fruit||0) + extraMonth;
-    const dayBase = extraDay * 30;
-    return baseFood + weekBase + monthBase + dayBase;
+    const extraDay = extras.filter(x => x.cycle==='day').reduce((s,x)=> s + cents(x.amount), 0) / 100;
+    const weekBase = multiplyMoney(sumMoney(extras.filter(x => x.cycle === 'week').map(x =>
+      sumMoney([x.amount, state.budgets.week?.[x.id]]))), weekKeysInMonth(monthKey).length);
+    const monthBase = sumMoney(['med', 'fun', 'net', 'daily', 'snack', 'fruit'].map(id => month[id]).concat(
+      extras.filter(x => x.cycle === 'month').map(x => sumMoney([x.amount, month[x.id]]))));
+    const info = monthDateFromKey(monthKey);
+    const dayBase = multiplyMoney(extraDay, info ? new Date(info.year, info.month + 1, 0).getDate() : 0);
+    return sumMoney([baseFood, weekBase, monthBase, dayBase]);
   }
 
   function calcMonthTotalRemainingByKey(monthKey){
     const total = monthTotalsEstimateByKey(monthKey);
     const used = state.txns
       .filter(t => t.kind==='expense' && t.monthKey===monthKey)
-      .reduce((s,t)=> s + Number(t.amount||0), 0);
-    return { total, used, remain: total - used };
+      .reduce((s,t)=> s + cents(t.amount), 0) / 100;
+    return { total, used, remain: subtractMoney(total, used) };
   }
 
   function applyPoolDelta(delta, type, key, label=''){
@@ -1169,144 +1183,73 @@
   }
 
   function monthTotalsEstimate(){
-    // We treat month total as sum of category budgets.
-    // 对“吃饭”改为按当月真实天数精算（按设置逐日累加）
-    const baseFood = foodMonthBudgetForMonth(now());
-    const week = state.budgets.week || {};
-    const month = state.budgets.month;
-    const extras = state.budgets.categoriesExtra || [];
-    const extraMonth = extras.filter(x => x.cycle==='month').reduce((s,x)=> s + Number(x.amount||0), 0);
-    const extraWeek = extras.filter(x => x.cycle==='week').reduce((s,x)=> s + Number(x.amount||0), 0);
-    const extraDay = extras.filter(x => x.cycle==='day').reduce((s,x)=> s + Number(x.amount||0), 0);
-    // week budgets estimated *4
-    const weekBase = (extraWeek) * 4;
-    const monthBase = Number(month.med||0) + Number(month.fun||0) + Number(month.net||0) + Number(month.daily||0) + Number(month.snack||0) + Number(month.fruit||0) + extraMonth;
-    const dayBase = extraDay * 30;
-    return baseFood + weekBase + monthBase + dayBase;
+    return monthTotalsEstimateByKey(ym(now()));
   }
 
-  function ensureToday(forceRebuild = false){
-    const todayKey = ymd(now());
-    if(state.cycles.month.food.todayKey !== todayKey || forceRebuild){
-      // 时间追溯补账（Catch-up）机制：计算跳过的天数 (非强制重建时执行)
-      const food = state.cycles.month.food;
-      const prevDayKey = food.todayKey;
-      if (prevDayKey && !forceRebuild) {
-        let current = new Date(prevDayKey);
-        current.setDate(current.getDate() + 1);
-        const target = new Date(todayKey);
-        
-        // 追溯中间跳过的每一天，累加预算（跳过补记花费，因为没登录意味着没记账）
-        while (current < target) {
-          const missedDateStr = ymd(current);
-          if (ym(current) === state.cycles.month.key) { // 仅累加同月份的跳过日期
-            const missedBudget = foodBudgetForDate(current).total;
-            food.monthBalance = Number(food.monthBalance || 0) + missedBudget;
-          }
-          current.setDate(current.getDate() + 1);
-        }
-      }
-      food.dayStartBalance = Number(food.monthBalance || 0);
-      const budget = foodBudgetForDate(now());
-      food.todaySpent = 0;
-      food.todayKey = todayKey;
-      food.monthBalance = Number(food.monthBalance || 0) + budget.total;
-      toast('已进入新一天（包含追溯补账）');
-      save();
+  // Derived balances are rebuilt from dates and transactions, never incremented.
+  function rebuildRealtime(){
+    const today = now();
+    const todayKey = ymd(today), mk = ym(today), wk = weekKey(today);
+    const previousMonth = state.cycles.month.key;
+    state.cycles.month.key = mk;
+    state.meta.monthKey = mk;
+    state.meta.weekKey = wk;
+    const monthExpenses = state.txns.filter(t => t.kind === 'expense' && t.monthKey === mk);
+    const sum = rows => sumMoney(rows.map(t => t.amount));
+    let foodAllocated = 0;
+    for(let day = 1; day <= today.getDate(); day++){
+      foodAllocated = sumMoney([foodAllocated, foodBudgetForDate(new Date(today.getFullYear(), today.getMonth(), day)).total]);
     }
-  }
-
-  function ensureWeek(forceRebuild = false){
-    const wk = weekKey(now());
-    if(state.cycles.week.key !== wk || forceRebuild){
-      const prevWk = state.cycles.week.key;
-      const mk = state.cycles.month.key;
-      
-      // 时间追溯补账（Catch-up）机制：计算跳过的周数 (仅在非强制重建时执行，避免重复累加)
-      if(prevWk && !forceRebuild) {
-        let currentWkStr = prevWk;
-        const wkFactor = 52/12;
-        const weeklyFruit = Math.round(Number(state.budgets.month.fruit||0) / wkFactor);
-        const weeklySnack = Math.round(Number(state.budgets.month.snack||0) / wkFactor);
-        
-        while (currentWkStr !== wk) {
-          // 只累加属于当前月份的周
-          const monthWeeks = weekKeysInMonth(mk);
-          if (monthWeeks.includes(currentWkStr)) {
-            const spentFruitPrev = sumSpentWeekInMonth('fruit', currentWkStr, mk);
-            const spentSnackPrev = sumSpentWeekInMonth('snack', currentWkStr, mk);
-            const remainFruitPrev = weeklyFruit - spentFruitPrev;
-            const remainSnackPrev = weeklySnack - spentSnackPrev;
-            
-            if(!state.cycles.month.weekCarry) state.cycles.month.weekCarry = { fruit: 0, snack: 0 };
-            if(remainFruitPrev > 0) state.cycles.month.weekCarry.fruit = Number(state.cycles.month.weekCarry.fruit||0) + remainFruitPrev;
-            if(remainSnackPrev > 0) state.cycles.month.weekCarry.snack = Number(state.cycles.month.weekCarry.snack||0) + remainSnackPrev;
-          }
-          
-          // 计算下一周的 weekKey
-          const parts = currentWkStr.split('-W');
-          if (parts.length === 2) {
-            let y = Number(parts[0]);
-            let w = Number(parts[1]);
-            let nextW = w + 1;
-            let nextY = y;
-            if (nextW > 52) { // 简单假设52周，原型够用
-              nextW = 1;
-              nextY = y + 1;
-            }
-            currentWkStr = `${nextY}-W${nextW.toString().padStart(2, '0')}`;
-          } else {
-            break;
-          }
-          
-          // 防止死循环保险
-          if (Number(currentWkStr.split('-W')[0]) > 2030) break; 
-        }
-      }
-
-      // reset week
-      state.cycles.week.key = wk;
-      const extras = categoryList().filter(c => c.cycle === 'week');
-      for(const c of extras){
-        state.cycles.week[c.id] = { spent: 0 };
-      }
-      if(state.cycles.pool.overdrafts?.week){
-        state.cycles.pool.overdrafts.week = {};
-      }
-      toast('已进入新一周（包含追溯补账）');
-      save();
+    const foodSpent = sum(monthExpenses.filter(t => t.category === 'food' && t.date <= todayKey));
+    const todaySpent = sum(monthExpenses.filter(t => t.category === 'food' && t.date === todayKey));
+    const foodBalance = subtractMoney(foodAllocated, foodSpent);
+    state.cycles.month.food = {
+      todayKey, todaySpent, monthBalance: foodBalance,
+      dayStartBalance: subtractMoney(sumMoney([foodBalance, todaySpent]), foodBudgetForDate(today).total)
+    };
+    const allocatedWeeks = weekKeysInMonth(mk).filter(key => key <= wk).length;
+    const throughWeek = rows => rows.filter(t => t.weekKey <= wk);
+    state.cycles.month.weekCarry = {};
+    for(const id of ['fruit', 'snack']){
+      const budget = Math.round(Number(state.budgets.month[id] || 0) / (52 / 12));
+      state.cycles.month.weekCarry[id] = subtractMoney(multiplyMoney(budget, allocatedWeeks),
+        sum(throughWeek(monthExpenses.filter(t => t.category === id))));
     }
+    state.cycles.week = { key: wk };
+    state.cycles.month.extraCarry = {};
+    for(const c of state.budgets.categoriesExtra || []){
+      const expenses = monthExpenses.filter(t => t.category === c.id);
+      if(c.cycle === 'week'){
+        state.cycles.week[c.id] = { spent: sum(expenses.filter(t => t.weekKey === wk)) };
+        const budget = sumMoney([state.budgets.week?.[c.id], c.amount]);
+        state.cycles.month.extraCarry[c.id] = subtractMoney(multiplyMoney(budget, allocatedWeeks), sum(throughWeek(expenses)));
+      }else if(c.cycle === 'day'){
+        state.cycles.month.extraCarry[c.id] = subtractMoney(multiplyMoney(c.amount, today.getDate()),
+          sum(expenses.filter(t => t.date <= todayKey)));
+      }
+    }
+    const reports = new Map((state.monthlyStats || []).map(stat => [stat.monthKey, stat]));
+    const keys = new Set(state.txns.map(t => t.monthKey));
+    if(previousMonth && previousMonth < mk) keys.add(previousMonth);
+    for(const key of keys){
+      if(key < mk && !reports.has(key)){
+        reports.set(key, { monthKey: key, budget: monthTotalsEstimateByKey(key) });
+      }
+    }
+    state.monthlyStats = [...reports.values()].map(stat => {
+      const spent = sumSpentMonthByKeyAll(stat.monthKey);
+      return { ...stat, spent, saved: subtractMoney(stat.budget, spent) };
+    }).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   }
 
-  function ensureMonth(forceRebuild = false){
-    const mk = ym(now());
-    if(state.cycles.month.key !== mk || forceRebuild){
-      // 只有在不是强制重建时，才结算上个月（避免导入时结算出奇怪的数据）
-      if(state.cycles.month.key && state.cycles.month.key !== mk && !forceRebuild) {
-        settleMonth();
-      }
-      // reset month cycle
-      state.cycles.month.key = mk;
-      state.meta.monthKey = mk;
-      // 新月份：清空“水果/零食 当月结余”（只在当月内累计，跨月不延续）
-      state.cycles.month.weekCarry = { fruit: 0, snack: 0 };
-      state.cycles.month.food.dayStartBalance = 0;
-      const budget = foodBudgetForDate(now());
-      state.cycles.month.food.todaySpent = 0;
-      state.cycles.month.food.todayKey = ymd(now());
-      state.cycles.month.food.monthBalance = budget.total;
-      state.cycles.pool.monthStartTotal = 0; // 跨月清零后，池底就是 0
-      if(state.cycles.pool.overdrafts){
-        state.cycles.pool.overdrafts.day = {};
-        state.cycles.pool.overdrafts.week = {};
-        state.cycles.pool.overdrafts.month = {};
-      }
-      // reset week key for new month (still based on actual week)
-      ensureWeek();
-      toast('已进入新月份（结余已清零）');
-      save();
-    }
+  function refreshTransactions(){
+    save();
+    render();
   }
+
+  function ensureToday(){ rebuildRealtime(); }
+  function ensureWeek(){ rebuildRealtime(); }
+  function ensureMonth(){ rebuildRealtime(); }
 
   function categoryList(){
     const extras = state.budgets.categoriesExtra || [];
@@ -1331,7 +1274,7 @@
     if(!cat) return null;
     if(catId === 'food'){
       const food = state.cycles.month.food;
-      const totalToday = Number(food.dayStartBalance || 0) + Number(foodBudgetForDate(now()).total || 0);
+      const totalToday = sumMoney([food.dayStartBalance, foodBudgetForDate(now()).total]);
       const remainToday = Number(food.monthBalance || 0);
       return {
         remain: remainToday,
@@ -1342,20 +1285,20 @@
       };
     }
     if(cat.cycle === 'week'){
-      const budget = Number(state.budgets.week[catId] || 0) + extraBudget(catId);
+      const budget = sumMoney([state.budgets.week[catId], extraBudget(catId)]);
       const spent = Number(state.cycles.week[catId]?.spent || 0);
-      return { remain: budget - spent, total: budget, used: spent, cycle:'week', label:'本周' + cat.name };
+      return { remain: subtractMoney(budget, spent), total: budget, used: spent, cycle:'week', label:'本周' + cat.name };
     }
     if(cat.cycle === 'month'){
-      const budget = Number(state.budgets.month[catId] || 0) + extraBudget(catId);
+      const budget = sumMoney([state.budgets.month[catId], extraBudget(catId)]);
       const spent = sumSpentMonth(catId);
-      return { remain: budget - spent, total: budget, used: spent, cycle:'month', label:'本月' + cat.name };
+      return { remain: subtractMoney(budget, spent), total: budget, used: spent, cycle:'month', label:'本月' + cat.name };
     }
     if(cat.cycle === 'day'){
       // extra day-category: daily fixed, but you didn't request additional day categories besides food. Still support.
       const budget = extraBudget(catId);
       const spent = sumSpentDay(catId);
-      return { remain: budget - spent, total: budget, used: spent, cycle:'day', label:'今日' + cat.name };
+      return { remain: subtractMoney(budget, spent), total: budget, used: spent, cycle:'day', label:'今日' + cat.name };
     }
     return null;
   }
@@ -1370,17 +1313,17 @@
     const key = state.cycles.month.key;
     return state.txns
       .filter(t => t.kind==='expense' && t.category===catId && t.monthKey===key)
-      .reduce((s,t)=> s + Number(t.amount||0), 0);
+      .reduce((s,t)=> s + cents(t.amount), 0) / 100;
   }
   function sumSpentMonthByKey(catId, monthKey){
     return state.txns
       .filter(t => t.kind==='expense' && t.category===catId && t.monthKey===monthKey)
-      .reduce((s,t)=> s + Number(t.amount||0), 0);
+      .reduce((s,t)=> s + cents(t.amount), 0) / 100;
   }
   function sumSpentWeekByKey(catId, weekK){
     return state.txns
       .filter(t => t.kind==='expense' && t.category===catId && t.weekKey===weekK)
-      .reduce((s,t)=> s + Number(t.amount||0), 0);
+      .reduce((s,t)=> s + cents(t.amount), 0) / 100;
   }
   function weekKeysInMonth(monthKey){
     // monthKey: YYYY-MM
@@ -1404,13 +1347,13 @@
   function sumSpentWeekInMonth(catId, weekK, monthKey){
     return state.txns
       .filter(t => t.kind==='expense' && t.category===catId && t.weekKey===weekK && t.monthKey===monthKey)
-      .reduce((s,t)=> s + Number(t.amount||0), 0);
+      .reduce((s,t)=> s + cents(t.amount), 0) / 100;
   }
   function sumSpentDay(catId){
     const key = ymd(now());
     return state.txns
       .filter(t => t.kind==='expense' && t.category===catId && t.date===key)
-      .reduce((s,t)=> s + Number(t.amount||0), 0);
+      .reduce((s,t)=> s + cents(t.amount), 0) / 100;
   }
 
   function calcMonthTotalRemaining(){
@@ -1421,8 +1364,8 @@
     const key = state.cycles.month.key;
     const used = state.txns
       .filter(t => t.kind==='expense' && t.monthKey===key)
-      .reduce((s,t)=> s + Number(t.amount||0), 0);
-    const remain = total - used;
+      .reduce((s,t)=> s + cents(t.amount), 0) / 100;
+    const remain = subtractMoney(total, used);
     return { total, used, remain };
   }
 
@@ -1432,7 +1375,7 @@
     // 计算本月总预算与总花费，用于记录历史
     const totalBudget = monthTotalsEstimateByKey(monthKey);
     const totalSpent = sumSpentMonthByKeyAll(monthKey);
-    const saved = totalBudget - totalSpent;
+    const saved = subtractMoney(totalBudget, totalSpent);
 
     if(!state.monthlyStats) state.monthlyStats = [];
     state.monthlyStats.push({
@@ -1448,7 +1391,7 @@
   function sumSpentMonthByKeyAll(monthKey){
     return state.txns
       .filter(t => t.kind==='expense' && t.monthKey===monthKey)
-      .reduce((s,t)=> s + Number(t.amount||0), 0);
+      .reduce((s,t)=> s + cents(t.amount), 0) / 100;
   }
 
   // --- Modal
@@ -1497,7 +1440,45 @@
     sideSimMount.appendChild(cardSimulators());
   }
 
-  function render(){
+  let preservingInputs = false;
+  let renderRevision = 0;
+  let midnightTimer;
+  const editableFields = root => $$('input:not([type="file"]), select, textarea', root);
+  function scheduleMidnightRefresh(){
+    clearTimeout(midnightTimer);
+    const current = now();
+    const midnight = new Date(current);
+    midnight.setHours(24, 0, 0, 0);
+    midnightTimer = setTimeout(() => refreshFromClock(false), midnight.getTime() - current.getTime() + 25);
+  }
+  function refreshFromClock(force){
+    if(!force && state.cycles.month.food.todayKey === ymd(now())){
+      scheduleMidnightRefresh();
+      return;
+    }
+    try{ render(true); }
+    catch(error){
+      console.error(error);
+      toast('自动刷新失败，请检查存储权限或空间；未提交输入仍保留');
+      scheduleMidnightRefresh();
+    }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible') refreshFromClock(true);
+  });
+  window.addEventListener('pageshow', () => refreshFromClock(true));
+  window.addEventListener('focus', () => refreshFromClock(true));
+
+  function render(keepInputs = false){
+    const revision = ++renderRevision;
+    const fields = keepInputs ? editableFields(screen) : [];
+    const drafts = fields.map(field => ({
+      value:field.value, checked:field.checked,
+      start:field.selectionStart, end:field.selectionEnd
+    }));
+    const activeIndex = fields.indexOf(document.activeElement);
+    const extraHtml = keepInputs ? $('#extraList', screen)?.innerHTML : null;
+    clearInterval(cardQuickAdd._mealTimer);
     const scrollY = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
     const screenScrollY = screen ? screen.scrollTop : 0;
 
@@ -1512,16 +1493,41 @@
     document.body.style.minHeight = currentHeight;
     document.documentElement.style.minHeight = currentHeight;
 
-    ensureMonth(); ensureWeek(); ensureToday();
+    save();
     titleEl.textContent = currentTab === 'ledger' ? '账本'
       : currentTab === 'voice' ? '语音'
       : currentTab === 'settings' ? '设置'
       : '历史';
 
+    preservingInputs = keepInputs;
     if(currentTab === 'ledger') renderLedger();
     if(currentTab === 'voice') renderVoice();
     if(currentTab === 'settings') renderSettings();
     if(currentTab === 'history') renderHistory();
+    preservingInputs = false;
+    if(keepInputs){
+      // Quick-category fields are mounted asynchronously. Restore after mounting.
+      setTimeout(() => {
+        if(revision !== renderRevision) return;
+        const extraList = $('#extraList', screen);
+        if(extraHtml !== null && extraHtml !== undefined && extraList) extraList.innerHTML = extraHtml;
+        const restored = editableFields(screen);
+        drafts.forEach((draft, index) => {
+          const field = restored[index];
+          if(!field) return;
+          field.value = draft.value;
+          field.checked = draft.checked;
+        });
+        const active = restored[activeIndex];
+        if(active){
+          active.focus({ preventScroll:true });
+          if(drafts[activeIndex].start !== null){
+            try{ active.setSelectionRange(drafts[activeIndex].start, drafts[activeIndex].end); }catch(error){}
+          }
+        }
+      }, 0);
+    }
+    scheduleMidnightRefresh();
 
     $$('.nav button').forEach(b => b.dataset.active = (b.dataset.tab===currentTab ? '1' : '0'));
     // 右侧面板里的“模拟工具”保持常驻
@@ -1558,7 +1564,7 @@
     const remainPct = 100 - usedPct;
 
     const food = state.cycles.month.food;
-    const totalToday = Number(food.dayStartBalance || 0) + Number(foodBudgetForDate(now()).total || 0);
+    const totalToday = sumMoney([food.dayStartBalance, foodBudgetForDate(now()).total]);
     const remainToday = Number(food.monthBalance || 0);
 
     const snack = calcRemainingForCategory('snack');
@@ -1579,7 +1585,7 @@
       // 当周可用：只按“本周预算 - 本周已花”，不叠加当月结余
       // 只统计“本月内”的那部分周支出（周跨月时，不把上个月同周的记录带进来）
       const spentThisWeek = sumSpentWeekInMonth(catId, wk, mk);
-      const weekAvail = weeklyBudget - spentThisWeek;
+      const weekAvail = subtractMoney(weeklyBudget, spentThisWeek);
       it.lines = [
         { label: '当周可用', value: weekAvail },
         { label: '当月结余', value: carry }
@@ -1619,6 +1625,7 @@
   }
 
   function cardQuickAdd(){
+    const allowAutoFocus = !preservingInputs;
     const el = document.createElement('div');
     el.className = 'quick';
     el.innerHTML = `
@@ -1678,31 +1685,8 @@
           toast('没有可撤销的');
           return;
         }
-        state.txns.shift();
-
-        // reverse counters similar to addTxn (only for current cycles)
-        if(t.kind === 'expense'){
-          const oldAmount = t.amount;
-          if(t.category === 'food' && t.date === state.cycles.month.food.todayKey){
-            state.cycles.month.food.todaySpent = Math.max(0, state.cycles.month.food.todaySpent - Number(t.amount||0));
-            state.cycles.month.food.monthBalance = Number(state.cycles.month.food.monthBalance||0) + Number(t.amount||0);
-          }
-          if(t.weekKey === state.cycles.week.key){
-            const cat = categoryList().find(c => c.id === t.category);
-            if(cat && cat.cycle === 'week'){
-              if(!state.cycles.week[t.category]) state.cycles.week[t.category] = { spent: 0 };
-              state.cycles.week[t.category].spent = Math.max(0, Number(state.cycles.week[t.category].spent||0) - Number(t.amount||0));
-            }
-          }
-          
-          // 动态回滚历史折线图（撤销等同于将原花费改为0）
-          updateMonthlyStatsForTxn({...t, amount: 0}, oldAmount);
-          
-          recalcOverdraftForTxn(t);
-        }
-        save();
+        deleteTxn(t.id);
         toast('已撤销上一笔');
-        render();
       }
 
       el.querySelector('[data-act="undo"]').onclick = undo;
@@ -1735,7 +1719,7 @@
         if(foodMeta) foodMeta.textContent = '自动：' + mealText(meal);
       }
       updateFoodMeta();
-      setInterval(updateFoodMeta, 30 * 1000);
+      cardQuickAdd._mealTimer = setInterval(updateFoodMeta, 30 * 1000);
       if(foodInput){
         const commitFood = () => commit(foodInput, (v)=> {
           const meal = guessMealByTime(now());
@@ -1743,7 +1727,9 @@
         });
         foodInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') commitFood(); });
         foodInput.addEventListener('blur', commitFood);
-        setTimeout(()=> foodInput.focus(), 50);
+        if(allowAutoFocus) setTimeout(()=> {
+          if(foodInput.isConnected && $('#modalBack').style.display !== 'flex') foodInput.focus();
+        }, 50);
       }
 
       // 其他类别：回车/失焦都可提交
@@ -1841,7 +1827,6 @@
           e.preventDefault();
           deleteTxn(b.dataset.id);
           toast('已删除');
-          render();
         };
       });
     },0);
@@ -1872,15 +1857,15 @@
     const el = document.createElement('div');
     el.className = 'card';
     // 吃饭字段口径：
-    // - 当月结余：到“今天开始”为止的累计结余（不含今日预算）。等于目前总剩余 (monthBalance) - 今天的初始预算
+    // - 当月结余：本月截至今天累计预算减对应支出，含今日预算与负数
     // - 今日预算剩余：今日预算 - 今日已花（每天自动更新）
     const todayBudget = Number(foodBudgetForDate(now()).total || 0);
-    const monthCarry = Number(food.dayStartBalance || 0) - todayBudget;
+    const monthCarry = Number(food.monthBalance || 0);
     const todaySpent = Number(food.todaySpent || 0);
-    const todayRemain = todayBudget - todaySpent;
+    const todayRemain = subtractMoney(todayBudget, todaySpent);
     const monthBudgetTotal = foodMonthBudgetForMonth(now());
     const monthSpent = sumSpentMonth('food');
-    const monthRemain = monthBudgetTotal - monthSpent;
+    const monthRemain = subtractMoney(monthBudgetTotal, monthSpent);
     const mg = guessMealByTime(now());
     const mealGuess = mg === 'breakfast' ? '早餐' : mg === 'lunch' ? '午餐' : mg === 'dinner' ? '晚餐' : '夜宵';
     el.innerHTML = `
@@ -1894,9 +1879,9 @@
       <div class="grid2" style="margin-top:10px;">
         <div><div class="label">当月可用（本月剩余）</div><div class="mono">¥ ${money(monthRemain)}</div></div>
         <div><div class="label">今日预算剩余（今日还能花）</div><div class="mono">¥ ${money(todayRemain)}</div></div>
-        <div><div class="label">当月结余（累计，不含今日预算）</div><div class="mono">¥ ${money(monthCarry)}</div></div>
+        <div><div class="label">当月结余（累计，含今日预算）</div><div class="mono">¥ ${money(monthCarry)}</div></div>
       </div>
-      <div class="hint">说明：今日预算剩余=今日预算-今日已花；当月结余=到今天为止累计结余（不含今日预算）；当月可用=当月总预算（按设置逐日累加）- 本月累计吃饭支出。</div>
+      <div class="hint">说明：今日预算剩余=今日预算-今日已花；当月结余=本月截至今天累计预算-截至今天吃饭支出（可为负数）；当月可用=当月总预算-本月全部吃饭支出，含未来记录。</div>
     `;
     // bind
     setTimeout(()=>{
@@ -1965,6 +1950,7 @@
             </div>
             <div class="mono">¥ ${money(r.remain)} / ¥ ${money(r.total)}</div>
           </div>
+          ${c.cycle !== 'month' ? `<div class="row"><span class="sub">当月结余</span><span class="mono">¥ ${money(state.cycles.month.extraCarry[c.id])}</span></div>` : ''}
         </div>
       `;
     }).join('');
@@ -2121,8 +2107,8 @@
     const wkFactor = 52/12; // 约 4.33 周/月
     const fruitPerWeek = Math.round(Number(m.fruit||0) / wkFactor);
     const snackPerWeek = Math.round(Number(m.snack||0) / wkFactor);
-    const wdDayTotal = Number(f.weekday?.lunch||0) + Number(f.weekday?.dinner||0) + Number(f.weekday?.supper||0);
-    const weDayTotal = Number(f.weekend?.lunch||0) + Number(f.weekend?.dinner||0) + Number(f.weekend?.supper||0);
+    const wdDayTotal = sumMoney([f.weekday?.lunch, f.weekday?.dinner, f.weekday?.supper]);
+    const weDayTotal = sumMoney([f.weekend?.lunch, f.weekend?.dinner, f.weekend?.supper]);
     el.innerHTML = `
       <div class="card">
         <div class="row">
@@ -2235,7 +2221,7 @@
           <div class="label">自定义类别（可新增）</div>
           <div class="sub">当前：${extras.length} 个</div>
           <button class="btn small" id="addCat" style="margin-top:10px;">新增类别</button>
-          <div id="extraList" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
+          <div id="extraList" class="grid2" style="margin-top:10px;">
             ${
               extras.length
                 ? extras.map(x => `
@@ -2250,9 +2236,9 @@
                         <option value="week" ${x.cycle==='week'?'selected':''}>按周</option>
                         <option value="month" ${x.cycle==='month'?'selected':''}>按月</option>
                       </select>
-                      <input class="input" data-extra-amount type="number" value="${Number(x.amount||0)}" />
+                      <input class="input" data-extra-amount type="number" step="0.1" value="${Number(x.amount||0)}" />
                     </div>
-                    <div class="hint">改完点页面底部“保存”。</div>
+                    <div class="hint">改完点页面底部“保存”；零预算类别也会保留。</div>
                   </div>
                 `).join('')
                 : `<div class="sub">暂无自定义类别</div>`
@@ -2261,10 +2247,10 @@
         </div>
 
         <div class="field">
-          <div class="label">月总预算（自动=分类预算汇总，示意按30天/4周估算）</div>
+          <div class="label">月总预算（自动=分类预算汇总）</div>
           <div class="kpi">
             <div class="big mono">¥ ${money(monthTotalsEstimate())}</div>
-            <div class="small">用于展示进度条；真实 App 会按真实天数周数精算</div>
+            <div class="small">按本月实际天数和自然周数汇总</div>
           </div>
         </div>
 
@@ -2389,9 +2375,9 @@
         name: (r.querySelector('[data-extra-name]')?.value || '').trim() || '未命名',
         cycle: r.querySelector('[data-extra-cycle]')?.value || 'month',
         amount: Number(r.querySelector('[data-extra-amount]')?.value || 0)
-      })).filter(x => x.amount > 0);
+      })).filter(x => Number.isFinite(x.amount) && x.amount >= 0);
 
-      // 预算保存后：用新的预算重算“当前可用”（不回滚历史交易，仅影响今天预算口径）
+      // 预算保存后：按新配置重算累计预算与对应支出
       recalcFoodForToday();
       save();
       toast('已保存预算设置');
@@ -2407,8 +2393,8 @@
       const wel = Number($('#weLunch')?.value || 0);
       const wed = Number($('#weDinner')?.value || 0);
       const wes = Number($('#weSupper')?.value || 0);
-      const wd = (isFinite(wdl)?wdl:0) + (isFinite(wdd)?wdd:0) + (isFinite(wds)?wds:0);
-      const we = (isFinite(wel)?wel:0) + (isFinite(wed)?wed:0) + (isFinite(wes)?wes:0);
+      const wd = sumMoney([wdl, wdd, wds].map(n => isFinite(n) ? n : 0));
+      const we = sumMoney([wel, wed, wes].map(n => isFinite(n) ? n : 0));
       const a = $('#wdTotal'), b = $('#wdTotal2'), c = $('#weTotal'), d = $('#weTotal2');
       if(a) a.textContent = money(wd);
       if(b) b.textContent = money(wd);
@@ -2447,6 +2433,14 @@
         </div>
 
         <div class="hr"></div>
+        <div class="row" style="margin-top:12px;">
+          <button class="btn" id="addTxn2">记一笔</button>
+          <button class="btn" id="exportExcel">导出 Excel</button>
+          <button class="btn" id="importExcelBtn">导入 Excel</button>
+          <input type="file" id="importExcelFile" accept=".xlsx, .xls" style="display:none;" />
+          <button class="btn primary" id="goLedger2">回账本</button>
+        </div>
+        <div class="hr"></div>
         <div class="label">最近交易（最多显示60条）</div>
         <div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
           ${list.length ? list.map(t => `
@@ -2470,13 +2464,7 @@
           `).join('') : `<div class="sub">还没有任何记录。</div>`}
         </div>
 
-        <div class="row" style="margin-top:12px;">
-          <button class="btn" id="addTxn2">记一笔</button>
-          <button class="btn" id="exportExcel">导出 Excel</button>
-          <button class="btn" id="importExcelBtn">导入 Excel</button>
-          <input type="file" id="importExcelFile" accept=".xlsx, .xls" style="display:none;" />
-          <button class="btn primary" id="goLedger2">回账本</button>
-        </div>
+
       </div>
     `;
     screen.innerHTML = '';
@@ -2500,7 +2488,6 @@
           e.preventDefault();
           deleteTxn(b.dataset.id);
           toast('已删除');
-          render();
         };
       });
     }, 0);
@@ -2552,162 +2539,169 @@
   }
 
   // --- Add transaction
+  function validTxnDate(value){
+    if(typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(value + 'T12:00:00');
+    return Number.isFinite(date.getTime()) && ymd(date) === value;
+  }
+
   function importFromExcel(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    const input = e.target;
+    const file = input.files[0];
+    if(!file) return;
     const reader = new FileReader();
-    reader.onload = function(evt) {
-      try {
-        const data = evt.target.result;
-        const wb = XLSX.read(data, { type: 'binary' });
-
-        // 1. 导入明细数据
-        if (wb.SheetNames.includes("账单明细")) {
-          const wsTxns = wb.Sheets["账单明细"];
-          const txnsData = XLSX.utils.sheet_to_json(wsTxns);
-          const newTxns = txnsData.map(row => {
-            const kind = row['类型'] === '收入' ? 'income' : 'expense';
-            const catStr = row['类别'] || '';
-            let category = 'daily', meal = null;
-
-            if (catStr.startsWith('吃饭-')) {
-              category = 'food';
-              const m = catStr.replace('吃饭-', '');
-              meal = m === '早餐' ? 'breakfast' : m === '午餐' ? 'lunch' : m === '晚餐' ? 'dinner' : m === '夜宵' ? 'supper' : 'breakfast';
-            } else {
-              const map = { '零食':'snack', '水果':'fruit', '药品':'med', '游玩':'fun', '网费':'net', '日用':'daily', '收入':'income' };
-              if (map[catStr]) {
-                category = map[catStr];
-              } else {
-                const extra = (state.budgets.categoriesExtra||[]).find(x => x.name === catStr);
-                if (extra) category = extra.id;
+    reader.onload = function(evt){
+      const previous = state;
+      const storageKeys = [LS_KEY, LS_KEY + '_backup', LS_AI_KEY, LS_AI_MODEL];
+      let stored;
+      let committed = false;
+      try{
+        stored = storageKeys.map(key => localStorage.getItem(key));
+        const wb = XLSX.read(evt.target.result, { type: 'binary' });
+        const recognized = ['账单明细', '月度报表', '自定义类别', '预算配置'];
+        if(!recognized.some(name => wb.SheetNames.includes(name))) throw new Error('无识别工作表');
+        const draft = JSON.parse(JSON.stringify(previous));
+        const rows = name => XLSX.utils.sheet_to_json(wb.Sheets[name]);
+        const amountOf = value => {
+          if(value === undefined || value === null || value === '') throw new Error('缺少金额');
+          const amount = Number(value);
+          if(!Number.isFinite(amount) || amount < 0 || !Number.isSafeInteger(cents(amount))) throw new Error('金额无效');
+          return fromCents(cents(amount));
+        };
+        const importedBudgets = new Map();
+        // Restore configuration and categories before resolving transaction names.
+        if(wb.Sheets['预算配置']){
+          for(const row of rows('预算配置')){
+            const key = row['配置项'];
+            const value = JSON.parse(row['配置值']);
+            if(key === 'food_daily'){
+              for(const day of ['weekday', 'weekend']){
+                for(const meal of ['lunch', 'dinner', 'supper']) amountOf(value[day][meal]);
               }
-            }
-
-            const d = new Date(row['日期'] + 'T12:00:00');
-            const mk = ym(d) || row['日期'].substring(0,7);
-            const wk = weekKey(d) || ymd(startOfWeekMonday(d));
-
-            return {
-              id: 't_' + (crypto.randomUUID ? crypto.randomUUID().slice(0,8) : Math.random().toString(16).slice(2,10)),
-              date: row['日期'],
-              monthKey: mk,
-              weekKey: wk,
-              kind,
-              category,
-              meal,
-              amount: Number(row['金额']) || 0,
-              note: row['备注'] || ''
-            };
-          });
-          state.txns = newTxns;
-        }
-
-        // 2. 导入月度统计数据
-        if (wb.SheetNames.includes("月度报表")) {
-          const wsStats = wb.Sheets["月度报表"];
-          const statsData = XLSX.utils.sheet_to_json(wsStats);
-          state.monthlyStats = statsData.map(row => ({
-            monthKey: row['月份'],
-            budget: Number(row['月总预算']) || 0,
-            spent: Number(row['总花销']) || 0,
-            saved: Number(row['节省结余']) || 0
-          }));
-        }
-
-        // 2.5 导入自定义类别
-        if (wb.SheetNames.includes("自定义类别")) {
-          const wsExtra = wb.Sheets["自定义类别"];
-          const extraData = XLSX.utils.sheet_to_json(wsExtra);
-          if (!state.budgets.categoriesExtra) state.budgets.categoriesExtra = [];
-          
-          extraData.forEach(row => {
-            const name = row['类别名称'];
-            const cycle = row['结算周期'] === '按周' ? 'week' : row['结算周期'] === '按月' ? 'month' : 'day';
-            const amount = Number(row['预算金额']) || 0;
-            
-            // 查重，如果没有才加
-            if(name && !state.budgets.categoriesExtra.find(x => x.name === name)) {
-              state.budgets.categoriesExtra.push({
-                id: 'ex_' + (crypto.randomUUID ? crypto.randomUUID().slice(0,6) : Math.random().toString(16).slice(2,8)),
-                name, cycle, amount
-              });
-            }
-          });
-        }
-
-        // 3. 强制重算 B 层结算数据 (cycles)
-        // 这一步非常关键，否则导入流水后主页的可用预算不会扣减
-        
-        // 我们要从头计算当前的 cycles 状态
-        state.cycles.week = {}; // 清空当前周数据缓存
-        
-        // 对月度预算做特殊处理
-        const currentMonthKey = ymd(now()).substring(0,7);
-        state.cycles.month.key = ''; // 强行清空，让 ensureMonth 重跑结算
-        
-        // 吃饭结余计算非常复杂，我们需要基于当月的历史重新推算
-        // 为了安全起见，这里直接重置当月统计
-        state.cycles.month.food = {}; 
-        state.cycles.month.weekCarry = {}; 
-        
-        // 这三个核心函数会根据当前时间 (now) 和最新的 state.txns 重新算出正确的 cycles 数据
-        // 但是对于强制重算，ensureMonth(true) + ensureToday(true) 会把 monthBalance 重置为仅当天的预算(40)
-        // 从而丢失了 1号 到 昨天的所有预算累计！
-        ensureMonth(true); 
-        ensureWeek(true);
-        ensureToday(true);
-
-        // 所以我们要手动重新累加当月到今天为止的【总预算】
-        const todayStr = ymd(now());
-        const wkStr = weekKey(now());
-        
-        let accumulatedFoodBudget = 0;
-        let d = new Date(currentMonthKey + '-01T12:00:00');
-        const end = new Date(todayStr + 'T12:00:00');
-        while(d <= end) {
-          accumulatedFoodBudget += foodBudgetForDate(d).total;
-          d.setDate(d.getDate() + 1);
-        }
-        
-        state.cycles.month.food.monthBalance = accumulatedFoodBudget;
-        state.cycles.month.food.todaySpent = 0; // 重置，下面循环重新累加
-        
-        // 我们要累加当前月所有的饭费开销，以及当前周所有的其他开销
-        state.txns.forEach(t => {
-          if(t.kind === 'expense') {
-            // 饭费：严格按当月扣除 (只要是当前月的记录)
-            if(t.category === 'food' && t.date.startsWith(currentMonthKey)) {
-               state.cycles.month.food.monthBalance -= t.amount;
-               if(t.date === todayStr) {
-                 state.cycles.month.food.todaySpent += t.amount;
-               }
-            } 
-            // 其他周期费用：如果属于当前自然周，则累加到 week 周期里扣减
-            else if(t.weekKey === wkStr && t.category !== 'food') {
-               // 这里要注意，如果是按月结算的类别 (如 net, daily, fun, med, snack, fruit)
-               // 我们在 calcRemainingForCategory 里面对于 month 周期的直接读了 sumSpentMonth
-               // 但对于 week 周期的 (snack, fruit, fun 等)，它是读的 state.cycles.week[catId].spent
-               if(!state.cycles.week[t.category]) state.cycles.week[t.category] = {spent: 0};
-               state.cycles.week[t.category].spent += t.amount;
+              draft.budgets.food_daily = value;
+            }else if(key === 'month' || key === 'week'){
+              if(!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('预算配置无效');
+              Object.values(value).forEach(amountOf);
+              importedBudgets.set(key, value);
+            }else if(key === 'mealRanges'){
+              if(!value || !['supperEnd', 'breakfastEnd', 'lunchEnd', 'dinnerEnd'].every(name =>
+                typeof value[name] === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value[name]))) throw new Error('餐别配置无效');
+              draft.meta.mealRanges = value;
             }
           }
-        });
-        
-        // 特别注意：导入后 dayStartBalance 应该根据最新的 monthBalance 推算
-        // 为了避免今天导入的数据导致今天剩余饭费出现错乱，我们强行校准 dayStartBalance
-        state.cycles.month.food.dayStartBalance = state.cycles.month.food.monthBalance + state.cycles.month.food.todaySpent;
-        
-        save();
-        toast('数据导入成功，预算已重新结算！');
-        render();
-      } catch (err) {
+        }
+        const base = { '吃饭':'food', '零食':'snack', '水果':'fruit', '药品':'med', '游玩':'fun', '网费':'net', '日用':'daily', '收入':'income' };
+        const newId = () => 'ex_' + (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(16).slice(2));
+        const extra = draft.budgets.categoriesExtra || (draft.budgets.categoriesExtra = []);
+        const baseIds = new Set(Object.values(base));
+        const idMap = new Map([...baseIds].map(id => [id, id]));
+        const validId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) &&
+          !['__proto__', 'prototype', 'constructor'].includes(id);
+        const bindId = (source, target) => {
+          if(source === undefined || source === '') return;
+          if(!validId(source) || (idMap.has(source) && idMap.get(source) !== target)) throw new Error('类别ID冲突或无效');
+          idMap.set(source, target);
+        };
+        const names = new Set();
+        if(wb.Sheets['自定义类别']){
+          for(const row of rows('自定义类别')){
+            const name = row['类别名称'];
+            const cycle = { '按日':'day', '按周':'week', '按月':'month' }[row['结算周期']];
+            if(typeof name !== 'string' || !name.trim() || !cycle || Object.hasOwn(base, name)) throw new Error('类别配置无效');
+            const amount = amountOf(row['预算金额']);
+            if(names.has(name)) throw new Error('类别名称重复');
+            names.add(name);
+            const sourceId = row['类别ID'];
+            if(sourceId !== undefined && (!validId(sourceId) || baseIds.has(sourceId))) throw new Error('类别ID无效');
+            let existing = extra.find(c => c.name === name);
+            if(existing){ Object.assign(existing, { cycle, amount }); }
+            else{
+              const id = sourceId && !extra.some(c => c.id === sourceId) ? sourceId : newId();
+              existing = { id, name, cycle, amount };
+              extra.push(existing);
+            }
+            bindId(sourceId, existing.id);
+          }
+        }
+        const unknown = new Set();
+        if(wb.Sheets['账单明细']){
+          draft.txns = rows('账单明细').map(row => {
+            const date = row['日期'];
+            if(!validTxnDate(date)) throw new Error('日期无效');
+            if(!['支出', '收入'].includes(row['类型'])) throw new Error('类型无效');
+            const name = row['类别'];
+            if(typeof name !== 'string' || !name.trim()) throw new Error('类别无效');
+            let category, meal = null;
+            if(name.startsWith('吃饭-')){
+              category = 'food';
+              meal = { '早餐':'breakfast', '午餐':'lunch', '晚餐':'dinner', '夜宵':'supper', '吃饭':null }[name.slice(3)];
+              if(meal === undefined) throw new Error('餐别无效');
+            }else if(Object.hasOwn(base, name)){
+              category = base[name];
+            }else{
+              let c = extra.find(item => item.name === name);
+              if(!c){
+                c = { id:newId(), name, cycle:'month', amount:0 };
+                extra.push(c);
+                unknown.add(name);
+              }
+              category = c.id;
+            }
+            bindId(row['类别ID'], category);
+            const d = new Date(date + 'T12:00:00');
+            return {
+              id:newId(), date, monthKey:ym(d), weekKey:weekKey(d),
+              kind:row['类型'] === '收入' ? 'income' : 'expense', category, meal,
+              amount:amountOf(row['金额']), note:String(row['备注'] || '')
+            };
+          });
+        }
+        for(const [bucket, values] of importedBudgets){
+          const mapped = {};
+          for(const [sourceId, amount] of Object.entries(values)){
+            if(!validId(sourceId)) throw new Error('预算键无效');
+            const targetId = idMap.get(sourceId) || (extra.some(c => c.id === sourceId) ? sourceId : null);
+            if(!targetId) throw new Error('预算键没有对应类别，无法安全恢复');
+            if(Object.hasOwn(mapped, targetId)) throw new Error('预算键映射冲突');
+            mapped[targetId] = amountOf(amount);
+          }
+          draft.budgets[bucket] = mapped;
+        }
+        if(wb.Sheets['月度报表']){
+          draft.monthlyStats = rows('月度报表').map(row => {
+            const monthKey = row['月份'];
+            if(typeof monthKey !== 'string' || !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(monthKey)) throw new Error('报表月份无效');
+            return { monthKey, budget:amountOf(row['月总预算']), spent:0, saved:0 };
+          });
+        }
+        state = draft;
+        committed = true;
+        refreshTransactions();
+        toast(unknown.size ? '数据导入成功；未知类别已按零预算保留：' + [...unknown].join('、') + '，请到设置补充预算' : '数据导入成功，预算已重新结算！');
+      }catch(err){
+        state = previous;
+        let rollbackFailed = false;
+        if(committed){
+          storageKeys.forEach((key, i) => {
+            try{
+              if(stored[i] === null) localStorage.removeItem(key);
+              else localStorage.setItem(key, stored[i]);
+              if(localStorage.getItem(key) !== stored[i]) throw new Error('存储回滚校验失败');
+            }catch(restoreError){ rollbackFailed = true; console.error(restoreError); }
+          });
+        }
         console.error(err);
-        toast('导入失败，请检查文件格式');
+        toast(rollbackFailed ? '导入失败，存储回滚失败：内存已恢复，但本地数据可能不一致，请立即导出备份并检查存储权限或空间' : '导入失败，原数据未改变，请检查文件或存储权限');
+      }finally{
+        input.value = '';
       }
     };
+    reader.onerror = reader.onabort = () => {
+      input.value = '';
+      toast('导入失败，文件读取失败');
+    };
     reader.readAsBinaryString(file);
-    e.target.value = ''; // Reset
+    input.value = '';
   }
 
   function exportToExcel() {
@@ -2718,6 +2712,7 @@
       '日期': t.date,
       '类型': t.kind === 'expense' ? '支出' : '收入',
       '类别': categoryName(t.category, t.meal),
+      '类别ID': t.category,
       '金额': t.amount,
       '备注': t.note || ''
     }));
@@ -2740,12 +2735,20 @@
     if (state.budgets.categoriesExtra && state.budgets.categoriesExtra.length > 0) {
       const extraData = state.budgets.categoriesExtra.map(c => ({
         '类别名称': c.name,
+        '类别ID': c.id,
         '结算周期': c.cycle === 'week' ? '按周' : c.cycle === 'month' ? '按月' : '按日',
         '预算金额': c.amount
       }));
       const wsExtra = XLSX.utils.json_to_sheet(extraData);
       XLSX.utils.book_append_sheet(wb, wsExtra, "自定义类别");
     }
+
+    // No API secrets are included in the portable budget configuration.
+    const configData = ['food_daily', 'month', 'week'].map(key => ({
+      '配置项': key, '配置值': JSON.stringify(state.budgets[key] || {})
+    }));
+    configData.push({ '配置项':'mealRanges', '配置值':JSON.stringify(state.meta.mealRanges) });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(configData), '预算配置');
 
     // 下载文件
     XLSX.writeFile(wb, "预算账本数据.xlsx");
@@ -2755,28 +2758,8 @@
   function deleteTxn(txId) {
     const idx = state.txns.findIndex(x => x.id === txId);
     if(idx < 0) return;
-    const tx = state.txns[idx];
     state.txns.splice(idx, 1);
-    if(tx.kind === 'expense'){
-      const oldAmount = tx.amount;
-      if(tx.category === 'food' && tx.monthKey === state.cycles.month.key) {
-        state.cycles.month.food.monthBalance = Number(state.cycles.month.food.monthBalance||0) + oldAmount;
-        if(tx.date === state.cycles.month.food.todayKey) {
-          state.cycles.month.food.todaySpent = Math.max(0, state.cycles.month.food.todaySpent - oldAmount);
-        }
-        state.cycles.month.food.dayStartBalance = state.cycles.month.food.monthBalance + state.cycles.month.food.todaySpent;
-      }
-      if(tx.weekKey === state.cycles.week.key){
-        const cat = categoryList().find(c => c.id === tx.category);
-        if(cat && cat.cycle === 'week'){
-          if(!state.cycles.week[tx.category]) state.cycles.week[tx.category] = { spent: 0 };
-          state.cycles.week[tx.category].spent = Math.max(0, Number(state.cycles.week[tx.category].spent||0) - oldAmount);
-        }
-      }
-      updateMonthlyStatsForTxn({...tx, amount: 0}, oldAmount);
-      recalcOverdraftForTxn(tx);
-    }
-    save();
+    refreshTransactions();
   }
 
   function openTxnModal(preset, isEdit = false){
@@ -2806,7 +2789,7 @@
       </div>
       <div class="field">
         <div class="label">金额</div>
-        <input class="input" id="amount" type="number" placeholder="例如 28" />
+        <input class="input" id="amount" type="number" step="0.1" placeholder="例如 28" />
       </div>
       <div class="field">
         <div class="label">日期</div>
@@ -2827,6 +2810,8 @@
     $('#cat', body).value = preset.category || 'food';
     $('#meal', body).value = preset.meal || guessMealByTime(now());
     $('#amount', body).value = preset.amount || '';
+    $('#date', body).value = preset.date || ymd(now());
+    $('#note', body).value = preset.note || '';
 
     function updateMeal(){
       const cat = $('#cat', body).value;
@@ -2847,10 +2832,11 @@
         toast('金额要大于 0');
         return;
       }
-      if (isEdit && preset.id) {
-        deleteTxn(preset.id);
+      if(!Number.isFinite(amount) || !validTxnDate(date)){
+        toast('金额或日期无效');
+        return;
       }
-      addTxn({ kind, category, meal: category==='food' ? meal : null, amount, date, note });
+      addTxn({ kind, category, meal: category==='food' ? meal : null, amount, date, note }, isEdit ? preset.id : null);
       closeModal();
       toast(isEdit ? '修改成功' : '已保存一笔');
       render();
@@ -2858,50 +2844,31 @@
     openModal(isEdit ? '修改记录' : '记一笔', body, [cancel, ok]);
   }
 
-  function addTxn(t){
+  function addTxn(t, editId = null){
     ensureToday(); ensureWeek(); ensureMonth();
     const d = new Date((t.date || ymd(now())) + 'T00:00:00');
     const monthKey = ym(d);
     const wk = weekKey(d);
     const tx = {
-      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2),
+      id: editId || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)),
       createdAt: new Date().toISOString(),
       kind: t.kind,
       category: t.category,
       meal: t.meal,
-      amount: Number(t.amount||0),
+      amount: fromCents(cents(t.amount)),
       date: t.date || ymd(now()),
       monthKey,
       weekKey: wk,
       note: t.note || ''
     };
-    state.txns.unshift(tx);
-
-    // apply to current-cycle counters only if txn is within current cycle keys (prototype simplification)
-    if(tx.kind === 'expense'){
-      if(tx.category === 'food' && tx.monthKey === state.cycles.month.key) {
-        state.cycles.month.food.monthBalance -= tx.amount;
-        if(tx.date === state.cycles.month.food.todayKey) {
-          state.cycles.month.food.todaySpent += tx.amount;
-        }
-        if(!isFinite(state.cycles.month.food.monthBalance)) state.cycles.month.food.monthBalance = 0;
-        state.cycles.month.food.dayStartBalance = state.cycles.month.food.monthBalance + state.cycles.month.food.todaySpent;
-      }
-      if(tx.weekKey === state.cycles.week.key){
-        // 周期为“周”的类别都在这里累计 spent（含自定义周类别）
-        const cat = categoryList().find(c => c.id === tx.category);
-        if(cat && cat.cycle === 'week'){
-          if(!state.cycles.week[tx.category]) state.cycles.week[tx.category] = { spent: 0 };
-          state.cycles.week[tx.category].spent += tx.amount;
-        }
-      }
-      
-      // 动态更新历史折线图
-      updateMonthlyStatsForTxn(tx);
-      
-      recalcOverdraftForTxn(tx);
+    const idx = editId ? state.txns.findIndex(item => item.id === editId) : -1;
+    if(idx >= 0){
+      tx.createdAt = state.txns[idx].createdAt;
+      state.txns[idx] = tx;
+    }else{
+      state.txns.unshift(tx);
     }
-    save();
+    refreshTransactions();
   }
 
   // --- Voice parsing (text-based)
@@ -3435,7 +3402,7 @@
       </div>
       <div class="field">
         <div class="label">预算额度</div>
-        <input class="input" id="amount" type="number" placeholder="例如 300" />
+        <input class="input" id="amount" type="number" step="0.1" placeholder="例如 300" />
       </div>
       <div class="hint">新增后会在账本页“自定义类别”里出现，也可以用语音新增。</div>
     `;
@@ -3445,7 +3412,8 @@
       const cycle = $('#cycle', body).value;
       const amount = Number($('#amount', body).value || 0);
       if(!name){ toast('名字不能为空'); return; }
-      if(!amount || amount<=0){ toast('预算要大于0'); return; }
+      if(categoryList().some(c => c.name === name)){ toast('类别名称已存在'); return; }
+      if(!Number.isFinite(amount) || amount<=0){ toast('预算要大于0'); return; }
       applyParsed({ type:'add_category', name, cycle, amount });
       closeModal();
       toast('已新增类别');
