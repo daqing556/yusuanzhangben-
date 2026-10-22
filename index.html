@@ -477,7 +477,7 @@
       </div>
       <div class="kpi">
         <div class="big">¥ 2,130</div>
-        <div class="small">已用 0% · 总额 ¥ 2,130</div>
+        <div class="small">已用 0% · ¥ 0 · 总额 ¥ 2,130</div>
       </div>
       <div class="bar"><div style="width:100%"></div></div>
     </div><div class="quick">
@@ -1836,6 +1836,7 @@
   function cardMonth(month, usedPct, remainPct){
     const el = document.createElement('div');
     el.className = 'card';
+    const usedAmount = (Number(month.total) || 0) - (Number(month.remain) || 0);
     el.innerHTML = `
       <div class="row">
         <div>
@@ -1846,7 +1847,7 @@
       </div>
       <div class="kpi">
         <div class="big">¥ ${money(month.remain)}</div>
-        <div class="small">已用 ${usedPct}% · 总额 ¥ ${money(month.total)}</div>
+        <div class="small">已用 ${usedPct}% · ¥ ${money(usedAmount)} · 总额 ¥ ${money(month.total)}</div>
       </div>
       <div class="bar"><div style="width:${remainPct}%"></div></div>
     `;
@@ -1903,7 +1904,7 @@
         const color = v < 0 ? `color:${getComputedStyle(document.documentElement).getPropertyValue('--danger')}` : `color:${getComputedStyle(document.documentElement).getPropertyValue('--muted')}`;
         return `<div class="row" style="justify-content:space-between; margin-top:4px;">
           <span class="sub">${stripHtml(String(x.label||''))}</span>
-          <span class="mono" style="font-weight:900; ${color}">¥ ${money(v)}</span>
+          <span class="mono" style="font-weight:900; ${color}">${money(v)}</span>
         </div>`;
       }).join('');
       return `
@@ -1913,7 +1914,7 @@
               <div class="mono" style="font-weight:900">${it.name}</div>
               <div class="sub">剩余 ${pct}%</div>
             </div>
-            <div class="mono">¥ ${money(r)} / ¥ ${money(t)}</div>
+            <div class="mono">${money(r)} / ${money(t)}</div>
           </div>
           ${extra ? `<div style="margin-top:6px;">${extra}</div>` : ``}
         </div>
@@ -1948,9 +1949,9 @@
               <div class="mono" style="font-weight:900">${c.name}</div>
               <div class="sub">周期：${c.cycle==='day'?'日':c.cycle==='week'?'周':'月'}</div>
             </div>
-            <div class="mono">¥ ${money(r.remain)} / ¥ ${money(r.total)}</div>
+            <div class="mono">${money(r.remain)} / ${money(r.total)}</div>
           </div>
-          ${c.cycle !== 'month' ? `<div class="row"><span class="sub">当月结余</span><span class="mono">¥ ${money(state.cycles.month.extraCarry[c.id])}</span></div>` : ''}
+          ${c.cycle !== 'month' ? `<div class="row"><span class="sub">当月结余</span><span class="mono">${money(state.cycles.month.extraCarry[c.id])}</span></div>` : ''}
         </div>
       `;
     }).join('');
